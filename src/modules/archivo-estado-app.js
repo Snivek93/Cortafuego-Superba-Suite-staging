@@ -1,6 +1,10 @@
 // ============================================================================
 // archivo-estado-app.js — encapsulado en IIFE (sin exponer todo a window; ver export list abajo)
 // ============================================================================
+// PROYECTO_ACTIVO_ID / PROYECTO_ACTIVO_CREADO_EN se declaran fuera del IIFE:
+// proyectos.js los reasigna directamente al abrir/crear/borrar un proyecto.
+var PROYECTO_ACTIVO_ID = null;
+var PROYECTO_ACTIVO_CREADO_EN = null;
 (function () {
 // ARCHIVO — Nuevo / Abrir / Guardar / Guardar como (comportamiento tipo Word)
 let CURRENT_FILE_HANDLE = null;
@@ -146,30 +150,12 @@ async function abrirArchivo() {
   }
 }
 
-function nuevoProyecto() {
-  const hacer = () => {
-    pushUndo();
-    ROWS = [];
-    ROWS_J = [];
-    Object.assign(CONFIG, CONFIG_DEFAULT);
-    PROJECT_INFO.nombre = ""; PROJECT_INFO.cliente = ""; PROJECT_INFO.fecha = "";
-    sincronizarCamposConfig();
-    CURRENT_FILE_HANDLE = null;
-    CURRENT_FILE_NAME = null;
-    ULTIMO_GUARDADO = null;
-    actualizarIndicadorArchivo();
-    borrarAutoguardado();
-    renderTable();
-    if (ACTIVE_TAB === "resumen") renderResumen();
-    if (ACTIVE_TAB === "levantamiento-tab") renderLevantamientoTab();
-    marcarCambio();
-    mostrarToast("Proyecto nuevo. Empezá agregando filas o un levantamiento.");
-  };
-  if (ROWS.length > 0 || ROWS_J.length > 0) {
-    pedirConfirmacion("Esto va a borrar el proyecto actual sin guardar. ¿Continuar?", hacer);
-  } else {
-    hacer();
-  }
+async function nuevoProyecto() {
+  // Antes esto vaciaba el proyecto actual en el lugar y pedía confirmación
+  // porque era destructivo. Con multi-proyecto ya no lo es: el proyecto
+  // anterior queda guardado tal cual, esto solo crea uno nuevo y cambia a él.
+  await crearYAbrirProyectoNuevo();
+  mostrarToast("Proyecto nuevo. Empezá agregando filas o un levantamiento.");
 }
 
 // ---------------------------------------------------------------------------
@@ -187,18 +173,23 @@ function nuevoProyecto() {
 // navigator.storage.persist(), y exportar .fss de vez en cuando.
 const AUTOSAVE_KEY = "hiltiCortafuegoAutoguardado_v1"; // clave vieja; solo se usa para migrar
 const IDB_NOMBRE = "firestopSuite";
-const IDB_STORE = "autoguardado";
-const IDB_CLAVE = "actual";
+const IDB_VERSION = 2; // v2: agrega 'proyectos' y 'meta' sin tocar el store viejo (se migra, no se borra en el upgrade)
+const IDB_STORE = "autoguardado"; // legacy v1 — solo lectura, para migración una sola vez
+const IDB_CLAVE = "actual"; // legacy v1
+const IDB_STORE_PROYECTOS = "proyectos"; // v2 — clave: id de proyecto, valor: mismo payload de siempre
+const IDB_STORE_META = "meta"; // v2 — clave 'activo': id del proyecto abierto actualmente
 let IDB_PROMESA = null;
 
 function abrirIDB() {
   if (IDB_PROMESA) return IDB_PROMESA;
   IDB_PROMESA = new Promise((resolve, reject) => {
     if (!window.indexedDB) { reject(new Error("IndexedDB no disponible en este navegador")); return; }
-    const req = indexedDB.open(IDB_NOMBRE, 1);
+    const req = indexedDB.open(IDB_NOMBRE, IDB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+      if (!db.objectStoreNames.contains(IDB_STORE_PROYECTOS)) db.createObjectStore(IDB_STORE_PROYECTOS);
+      if (!db.objectStoreNames.contains(IDB_STORE_META)) db.createObjectStore(IDB_STORE_META);
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error || new Error("No se pudo abrir IndexedDB"));
@@ -206,6 +197,7 @@ function abrirIDB() {
   });
   return IDB_PROMESA;
 }
+// --- Legacy v1 (un solo slot) — solo se usan para leer/migrar/limpiar ---
 function idbGuardar(valor) {
   return abrirIDB().then((db) => new Promise((resolve, reject) => {
     const tx = db.transaction(IDB_STORE, "readwrite");
@@ -229,6 +221,62 @@ function idbBorrar() {
     tx.objectStore(IDB_STORE).delete(IDB_CLAVE);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error || new Error("Error al borrar"));
+  }));
+}
+// --- v2 multi-proyecto ---
+function idbGuardarProyecto(id, valor) {
+  return abrirIDB().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE_PROYECTOS, "readwrite");
+    tx.objectStore(IDB_STORE_PROYECTOS).put(valor, id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error("Error al escribir el proyecto"));
+    tx.onabort = () => reject(tx.error || new Error("Transacción abortada (¿sin espacio?)"));
+  }));
+}
+function idbLeerProyecto(id) {
+  return abrirIDB().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE_PROYECTOS, "readonly");
+    const req = tx.objectStore(IDB_STORE_PROYECTOS).get(id);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error || new Error("Error al leer el proyecto"));
+  }));
+}
+function idbBorrarProyecto(id) {
+  return abrirIDB().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE_PROYECTOS, "readwrite");
+    tx.objectStore(IDB_STORE_PROYECTOS).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error("Error al borrar el proyecto"));
+  }));
+}
+function idbListarProyectos() {
+  return abrirIDB().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE_PROYECTOS, "readonly");
+    const store = tx.objectStore(IDB_STORE_PROYECTOS);
+    const out = [];
+    const req = store.openCursor();
+    req.onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (cursor) { out.push({ id: cursor.key, data: cursor.value }); cursor.continue(); }
+      else resolve(out);
+    };
+    req.onerror = () => reject(req.error || new Error("Error al listar proyectos"));
+  }));
+}
+function idbGuardarActivo(id) {
+  return abrirIDB().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE_META, "readwrite");
+    tx.objectStore(IDB_STORE_META).put(id, "activo");
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error("Error al guardar el proyecto activo"));
+  }));
+}
+function idbLeerActivo() {
+  return abrirIDB().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE_META, "readonly");
+    const req = tx.objectStore(IDB_STORE_META).get("activo");
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error || new Error("Error al leer el proyecto activo"));
   }));
 }
 
@@ -261,11 +309,16 @@ async function guardarAutoAhora() {
   // Si ya hay una escritura en vuelo, se marca pendiente y se reintenta al
   // terminar — evita que dos guardados se pisen y queden fuera de orden.
   if (guardadoEnCurso) { guardadoPendiente = true; return; }
+  // Sin proyecto activo no hay dónde guardar (ej. justo antes de que
+  // termine de arrancar la Pantalla de Proyectos). No es un error.
+  if (!PROYECTO_ACTIVO_ID) return;
   guardadoEnCurso = true;
   try {
     const payload = datosProyectoActual();
+    payload.id = PROYECTO_ACTIVO_ID;
     payload.guardadoEn = new Date().toISOString();
-    await idbGuardar(payload);
+    payload.creadoEn = PROYECTO_ACTIVO_CREADO_EN || payload.guardadoEn;
+    await idbGuardarProyecto(PROYECTO_ACTIVO_ID, payload);
     if (FALLO_AUTOGUARDADO) FALLO_AUTOGUARDADO = false;
     marcarGuardado();
   } catch (e) {
@@ -328,6 +381,121 @@ async function cargarAutoguardado() {
 function borrarAutoguardado() {
   idbBorrar().catch((e) => console.error("No se pudo borrar el autoguardado:", e));
   try { localStorage.removeItem(AUTOSAVE_KEY); } catch (e) {}
+}
+
+// ---------------------------------------------------------------------------
+// MULTI-PROYECTO — abrir / crear / migrar
+// ---------------------------------------------------------------------------
+// Vuelca un payload guardado (mismo formato de siempre) sobre el estado en
+// memoria de la app. Reutilizado tanto al abrir un proyecto existente como
+// al restaurar el activo en el arranque.
+function cargarProyectoEnApp(data) {
+  ROWS = Array.isArray(data.filas) ? data.filas.map(f => Object.assign(nuevaFila(), f, { _id: typeof f._id === "number" ? f._id : ROW_SEQ++ })) : [];
+  ROW_SEQ = Math.max(ROW_SEQ, ...ROWS.map(r => r._id), 0) + 1;
+  if (Array.isArray(data.filasJuntas)) {
+    ROWS_J = data.filasJuntas.map(f => Object.assign({}, f, { _id: typeof f._id === "number" ? f._id : ROW_J_SEQ++ }));
+    ROW_J_SEQ = Math.max(ROW_J_SEQ, ...ROWS_J.map(r => r._id), 0) + 1;
+  } else {
+    ROWS_J = [];
+  }
+  MANUAL_ITEMS = Array.isArray(data.itemsManuales) ? data.itemsManuales.map(m => Object.assign({}, m, { _id: MANUAL_ITEM_SEQ++ })) : [];
+  Object.assign(CONFIG, CONFIG_DEFAULT);
+  if (data.config) Object.assign(CONFIG, data.config);
+  PROJECT_INFO.nombre = ""; PROJECT_INFO.cliente = ""; PROJECT_INFO.fecha = "";
+  if (data.projectInfo) Object.assign(PROJECT_INFO, data.projectInfo);
+  if (data.mainTableOverride) MAIN_TABLE = data.mainTableOverride;
+  if (data.juntasTableOverride) JUNTAS_TABLE = data.juntasTableOverride;
+  PLANOS = Array.isArray(data.planos) ? data.planos : [];
+  PLANO_SEQ = PLANOS.reduce((m, p) => Math.max(m, p.id || 0), 0) + 1;
+  INFORMES_ACREDITACION = Array.isArray(data.informes) ? data.informes : [];
+  INFORME_ACR_SEQ = INFORMES_ACREDITACION.reduce((m, i) => Math.max(m, i.id || 0), 0) + 1;
+  sincronizarCamposConfig();
+  const pn = document.getElementById("proj-nombre"); if (pn) pn.value = PROJECT_INFO.nombre;
+  const pc = document.getElementById("proj-cliente"); if (pc) pc.value = PROJECT_INFO.cliente;
+  const pf = document.getElementById("proj-fecha"); if (pf) pf.value = PROJECT_INFO.fecha;
+  renderTable();
+  renderLevantamientoTab();
+}
+
+// Abre un proyecto que YA existe en el store 'proyectos'. Devuelve false sin
+// tocar nada si el id no existe (ej. el puntero 'activo' quedó apuntando a
+// algo que se borró) — el que llama decide qué hacer en ese caso.
+async function abrirProyectoExistente(id) {
+  let data = null;
+  try {
+    data = await idbLeerProyecto(id);
+  } catch (e) {
+    avisarFalloGuardado(e);
+    return false;
+  }
+  if (!data) return false;
+  PROYECTO_ACTIVO_ID = id;
+  PROYECTO_ACTIVO_CREADO_EN = data.creadoEn || data.guardadoEn || new Date().toISOString();
+  try { await idbGuardarActivo(id); } catch (e) { /* best-effort: si falla, se reintenta el próximo guardado */ }
+  cargarProyectoEnApp(data);
+  CURRENT_FILE_HANDLE = null;
+  CURRENT_FILE_NAME = null;
+  UNDO_STACK.length = 0;
+  actualizarBotonDeshacer();
+  ULTIMO_GUARDADO = data.guardadoEn ? new Date(data.guardadoEn) : null;
+  FALLO_AUTOGUARDADO = false;
+  actualizarIndicadorArchivo();
+  return true;
+}
+
+// Crea un proyecto vacío y lo deja como activo. No escribe nada en IndexedDB
+// todavía — el primer autoguardado (marcarCambio → guardarAutoAhora) es el
+// que efectivamente lo persiste bajo este id. Si el usuario no le pone
+// nombre, PROJECT_INFO.nombre queda vacío y la Pantalla de Proyectos lo
+// muestra en "Borradores" con la fecha de creación.
+async function crearYAbrirProyectoNuevo() {
+  const id = "p_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
+  PROYECTO_ACTIVO_ID = id;
+  PROYECTO_ACTIVO_CREADO_EN = new Date().toISOString();
+  try { await idbGuardarActivo(id); } catch (e) {}
+  ROWS = []; ROWS_J = []; MANUAL_ITEMS = []; PLANOS = []; INFORMES_ACREDITACION = [];
+  Object.assign(CONFIG, CONFIG_DEFAULT);
+  PROJECT_INFO.nombre = ""; PROJECT_INFO.cliente = ""; PROJECT_INFO.fecha = "";
+  sincronizarCamposConfig();
+  const pn = document.getElementById("proj-nombre"); if (pn) pn.value = "";
+  const pc = document.getElementById("proj-cliente"); if (pc) pc.value = "";
+  const pf = document.getElementById("proj-fecha"); if (pf) pf.value = "";
+  renderTable();
+  renderLevantamientoTab();
+  CURRENT_FILE_HANDLE = null;
+  CURRENT_FILE_NAME = null;
+  UNDO_STACK.length = 0;
+  actualizarBotonDeshacer();
+  ULTIMO_GUARDADO = null;
+  FALLO_AUTOGUARDADO = false;
+  actualizarIndicadorArchivo();
+  return id;
+}
+
+// Se corre una sola vez en el arranque: si todavía no existe ningún proyecto
+// en el store nuevo pero hay algo rescatable del slot único viejo (v1
+// IndexedDB o el localStorage de antes), lo convierte en el primer proyecto
+// de la lista y lo deja activo — el usuario ni se entera de la migración.
+async function migrarProyectoUnicoSiHaceFalta() {
+  let lista = [];
+  try { lista = await idbListarProyectos(); } catch (e) { return; }
+  if (lista.length > 0) return;
+  let dataVieja = null;
+  try { dataVieja = await idbLeer(); } catch (e) { dataVieja = null; }
+  if (!dataVieja) dataVieja = await migrarDesdeLocalStorage();
+  if (!autoguardadoTieneContenido(dataVieja)) return;
+  const id = "p_" + Date.now().toString(36) + "_migrado";
+  dataVieja.id = id;
+  dataVieja.creadoEn = dataVieja.guardadoEn || new Date().toISOString();
+  dataVieja.guardadoEn = dataVieja.guardadoEn || new Date().toISOString();
+  try {
+    await idbGuardarProyecto(id, dataVieja);
+    await idbGuardarActivo(id);
+    await idbBorrar(); // ya está copiado — limpia el slot viejo para no migrar dos veces
+    console.info("Proyecto único migrado a la estructura multi-proyecto:", id);
+  } catch (e) {
+    console.error("No se pudo migrar el proyecto único a multi-proyecto:", e);
+  }
 }
 
 let UNDO_STACK = [];
@@ -600,6 +768,8 @@ async function initApp() {
   document.getElementById("btn-pdf-planos").addEventListener("click", exportarPlanosPDF);
 
   document.getElementById("btn-archivo-nuevo").addEventListener("click", nuevoProyecto);
+  const btnMisProyectos = document.getElementById("btn-mis-proyectos");
+  if (btnMisProyectos) btnMisProyectos.addEventListener("click", () => { if (window.mostrarPantallaProyectos) window.mostrarPantallaProyectos(); });
   document.getElementById("btn-archivo-abrir").addEventListener("click", abrirArchivo);
   document.getElementById("btn-archivo-guardar").addEventListener("click", guardarArchivo);
   document.getElementById("btn-archivo-guardar-como").addEventListener("click", guardarComoArchivo);
@@ -637,33 +807,26 @@ async function initApp() {
   pedirAlmacenamientoPersistente();
 
   if (cargoEmbebido) {
+    // Un .html abierto con datos embebidos se trata como proyecto nuevo
+    // propio (con su propio id), así el autoguardado normal lo protege
+    // igual que a cualquier otro proyecto.
+    PROYECTO_ACTIVO_ID = "p_" + Date.now().toString(36) + "_embebido";
+    PROYECTO_ACTIVO_CREADO_EN = new Date().toISOString();
+    try { await idbGuardarActivo(PROYECTO_ACTIVO_ID); } catch (e) {}
     renderTable();
     renderLevantamientoTab();
     mostrarToast(`Proyecto cargado automáticamente: ${ROWS.length} fila(s).`);
   } else {
-    const auto = await cargarAutoguardado();
-    if (auto) {
-      ROWS = auto.filas.map(f => Object.assign(nuevaFila(), f, { _id: typeof f._id === "number" ? f._id : ROW_SEQ++ }));
-      ROW_SEQ = Math.max(ROW_SEQ, ...ROWS.map(r => r._id), 0) + 1;
-      if (Array.isArray(auto.filasJuntas)) {
-        ROWS_J = auto.filasJuntas.map(f => Object.assign({}, f, { _id: typeof f._id === "number" ? f._id : ROW_J_SEQ++ }));
-        ROW_J_SEQ = Math.max(ROW_J_SEQ, ...ROWS_J.map(r => r._id), 0) + 1;
-      }
-      MANUAL_ITEMS = Array.isArray(auto.itemsManuales) ? auto.itemsManuales.map(m => Object.assign({}, m, { _id: MANUAL_ITEM_SEQ++ })) : [];
-      if (auto.config) Object.assign(CONFIG, auto.config);
-      if (auto.projectInfo) Object.assign(PROJECT_INFO, auto.projectInfo);
-      PLANOS = Array.isArray(auto.planos) ? auto.planos : [];
-      PLANO_SEQ = PLANOS.reduce((m, p) => Math.max(m, p.id || 0), 0) + 1;
-      INFORMES_ACREDITACION = Array.isArray(auto.informes) ? auto.informes : [];
-      INFORME_ACR_SEQ = INFORMES_ACREDITACION.reduce((m, i) => Math.max(m, i.id || 0), 0) + 1;
-      sincronizarCamposConfig();
-      const pn = document.getElementById("proj-nombre"); if (pn) pn.value = PROJECT_INFO.nombre;
-      const pc = document.getElementById("proj-cliente"); if (pc) pc.value = PROJECT_INFO.cliente;
-      const pf = document.getElementById("proj-fecha"); if (pf) pf.value = PROJECT_INFO.fecha;
-      renderTable();
-      renderLevantamientoTab();
-      mostrarToast(`Se restauró tu último autoguardado: ${ROWS.length} fila(s).`);
+    await migrarProyectoUnicoSiHaceFalta();
+    let activoId = null;
+    try { activoId = await idbLeerActivo(); } catch (e) { activoId = null; }
+    const restaurado = activoId ? await abrirProyectoExistente(activoId) : false;
+    if (restaurado) {
+      mostrarToast(`Se restauró tu último proyecto: ${ROWS.length} fila(s).`);
+    } else if (window.mostrarPantallaProyectos) {
+      await window.mostrarPantallaProyectos();
     } else {
+      // Red de seguridad si proyectos.js no llegó a cargar por algún motivo.
       for (let i = 0; i < 3; i++) ROWS.push(nuevaFila());
       renderTable();
       renderLevantamientoTab();
@@ -677,4 +840,10 @@ window.marcarCambio = marcarCambio;
 window.UNDO_STACK = UNDO_STACK;
 window.pushUndo = pushUndo;
 window.deshacerCambio = deshacerCambio;
+window.idbListarProyectos = idbListarProyectos;
+window.idbBorrarProyecto = idbBorrarProyecto;
+window.idbLeerActivo = idbLeerActivo;
+window.idbGuardarActivo = idbGuardarActivo;
+window.abrirProyectoExistente = abrirProyectoExistente;
+window.crearYAbrirProyectoNuevo = crearYAbrirProyectoNuevo;
 })();
