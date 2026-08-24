@@ -770,6 +770,14 @@ async function initApp() {
   document.getElementById("btn-archivo-nuevo").addEventListener("click", nuevoProyecto);
   const btnMisProyectos = document.getElementById("btn-mis-proyectos");
   if (btnMisProyectos) btnMisProyectos.addEventListener("click", () => { if (window.mostrarPantallaProyectos) window.mostrarPantallaProyectos(); });
+  const btnCerrarSesion = document.getElementById("btn-cerrar-sesion");
+  if (btnCerrarSesion) btnCerrarSesion.addEventListener("click", () => {
+    if (window.pedirConfirmacion) {
+      pedirConfirmacion("¿Cerrar sesión?", () => { if (window.cerrarSesion) cerrarSesion(); });
+    } else if (confirm("¿Cerrar sesión?")) {
+      if (window.cerrarSesion) cerrarSesion();
+    }
+  });
   document.getElementById("btn-archivo-abrir").addEventListener("click", abrirArchivo);
   document.getElementById("btn-archivo-guardar").addEventListener("click", guardarArchivo);
   document.getElementById("btn-archivo-guardar-como").addEventListener("click", guardarComoArchivo);
@@ -817,6 +825,7 @@ async function initApp() {
     renderLevantamientoTab();
     mostrarToast(`Proyecto cargado automáticamente: ${ROWS.length} fila(s).`);
   } else {
+    if (window.esperarAutenticacion) await window.esperarAutenticacion();
     await migrarProyectoUnicoSiHaceFalta();
     let activoId = null;
     try { activoId = await idbLeerActivo(); } catch (e) { activoId = null; }
