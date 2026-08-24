@@ -46,6 +46,7 @@
   <symbol id="i-arrow-left" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></symbol>
+  <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 2c1 3-2 4-2 7a2 2 0 0 0 4 0c1.5 1 2 3 2 4.5A5.5 5.5 0 0 1 6.5 18C6.5 12 12 10 12 2Z"/></symbol>
   <symbol id="i-list" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></symbol>
   <symbol id="i-clipboard" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></symbol>
   <symbol id="i-clipboard-list" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/></symbol>
@@ -170,6 +171,8 @@
         <button class="dropdown-item" id="btn-export-excel-lev-pen"><svg class="icon"><use href="#i-download"/></svg>Exportar Levantamiento Penetrantes en Excel</button>
         <button class="dropdown-item" id="btn-export-excel-lev-juntas"><svg class="icon"><use href="#i-download"/></svg>Exportar Levantamiento Juntas en Excel</button>
         <button class="dropdown-item" id="btn-import-txt"><svg class="icon"><use href="#i-upload"/></svg>Cargar desde texto</button>
+        <div class="dropdown-sep"></div>
+        <button class="dropdown-item" id="btn-cerrar-sesion"><svg class="icon"><use href="#i-close"/></svg>Cerrar sesión</button>
       </div>
       <input type="file" id="file-abrir-proyecto" accept=".html,text/html,.json,application/json" hidden>
       <input type="file" id="file-import-json" accept=".fss,.json,application/json" hidden>
@@ -649,6 +652,9 @@
 <script src="src/modules/archivo-guardar-cargar.js"></script>
 <script src="src/modules/excel-export-import.js"></script>
 <script src="src/modules/importar-texto-libre.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-auth-compat.js"></script>
+<script src="src/modules/firebase-auth.js"></script>
 <script src="src/modules/archivo-estado-app.js"></script>
 <script src="src/modules/proyectos.js"></script>
 <script src="src/modules/tema-claro-oscuro.js"></script>
