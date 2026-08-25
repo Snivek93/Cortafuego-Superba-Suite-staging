@@ -152,7 +152,8 @@ header.app-header h1 { font-size: var(--fs-md); margin: 0; font-weight: 600; let
 .dropdown { position: relative; }
 .dropdown-panel { display: none; position: fixed; z-index: 500; background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 10px 28px rgba(0,0,0,0.16); min-width: 250px; padding: 6px; flex-direction: column; }
 .dropdown-panel.open { display: flex; }
-.dropdown-item { display: flex; align-items: center; border: none; background: transparent; text-align: left; padding: 10px 12px; border-radius: var(--radius-sm); font-size: var(--fs-base); cursor: pointer; color: var(--ink); }
+.dropdown-item { display: flex; align-items: center; gap: 10px; border: none; background: transparent; text-align: left; padding: 10px 12px; border-radius: var(--radius-sm); font-size: var(--fs-base); cursor: pointer; color: var(--ink); }
+.dropdown-item .icon { margin-right: 0; }
 @media (hover: hover) and (pointer: fine) { .dropdown-item:hover { background: var(--grey-1); } }
 .dropdown-sep { height: 1px; background: var(--border); margin: 6px 4px; }
 .dropdown-section-title { font-size: var(--fs-2xs); font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 8px 12px 2px; }
@@ -161,7 +162,7 @@ header.app-header h1 { font-size: var(--fs-md); margin: 0; font-weight: 600; let
 .dropdown-item-sub { justify-content: space-between; }
 .icon-chevron-right { width: 14px; height: 14px; margin-right: 0; margin-left: auto; transition: transform .15s ease; }
 .dropdown-item-sub.open .icon-chevron-right { transform: rotate(90deg); }
-.dropdown-sub-panel { display: none; flex-direction: column; margin: 2px 4px 4px 14px; padding-left: 10px; border-left: 2px solid var(--grey-2); }
+.dropdown-sub-panel { display: none; flex-direction: column; margin: 2px 4px 4px 14px; padding-left: 10px; border-left: 2px solid var(--grey-2); max-height: 220px; overflow-y: auto; }
 .dropdown-sub-panel.open { display: flex; }
 @media (max-width: 700px) {
   header.app-header { padding: 0 0 10px; }
@@ -839,7 +840,7 @@ button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
 .proy-header-mark-logo { display: block; width: 100%; height: 100%; object-fit: cover; }
 .proy-header-icon-btn { width: 38px; height: 38px; border-radius: 11px; background: rgba(255,255,255,0.1); border: none; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; color: #ffffff; padding: 0; }
 .proy-header-icon-btn .icon { margin-right: 0; }
-.proy-header-full-title { color: #ffffff; font-size: var(--fs-md); font-weight: 600; margin: 0; }
+.proy-header-full-title { color: #ffffff; font-size: var(--fs-lg); font-weight: 600; margin: 0; }
 .proy-header-full-sub { color: #9a9a9e; font-size: var(--fs-2xs); margin: 0; letter-spacing: 0.03em; }
 .proy-avatar-btn { width: 36px; height: 36px; border-radius: 50%; background: rgba(255,255,255,0.12); border: none; color: #ffffff; font-weight: 700; font-size: var(--fs-xs); cursor: pointer; flex-shrink: 0; padding: 0; }
 
@@ -868,18 +869,22 @@ button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
 .proy-fab .icon { width: 24px; height: 24px; margin-right: 0; }
 @media (hover: hover) and (pointer: fine) { .proy-fab:hover { background: var(--hilti-red-dark); } }
 
-.proy-account-popup { position: absolute; top: 60px; right: var(--edge-pad); background: var(--surface-raised); border-radius: 14px; box-shadow: 0 8px 24px rgba(0,0,0,0.25); width: 240px; overflow: hidden; z-index: 8002; border: 1px solid var(--border); }
+.proy-account-popup { position: absolute; top: 60px; right: var(--edge-pad); background: var(--surface-raised); border-radius: 14px; box-shadow: 0 8px 24px rgba(0,0,0,0.25); width: 250px; overflow: hidden; z-index: 8002; border: 1px solid var(--border); }
 .proy-account-popup[hidden] { display: none; }
 .proy-account-popup-head { display: flex; align-items: center; gap: 10px; padding: 14px; border-bottom: 1px solid var(--border); }
 .proy-account-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--err-bg); color: var(--hilti-red); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: var(--fs-xs); flex-shrink: 0; }
-.proy-account-info { min-width: 0; }
+.proy-account-info { min-width: 0; flex: 1; }
 .proy-account-name { font-size: var(--fs-sm); font-weight: 600; color: var(--ink); margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .proy-account-email { font-size: var(--fs-2xs); color: var(--text-muted); margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.proy-account-item { display: flex; align-items: center; width: 100%; border: none; background: transparent; text-align: left; padding: 10px 14px; font-size: var(--fs-sm); color: var(--ink); cursor: pointer; }
-.proy-account-item .icon { width: 16px; height: 16px; }
-@media (hover: hover) and (pointer: fine) { .proy-account-item:hover { background: var(--grey-1); } }
+.proy-account-edit-btn { flex-shrink: 0; width: 30px; height: 30px; border-radius: 8px; border: none; background: var(--grey-1); color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+.proy-account-edit-btn .icon { width: 14px; height: 14px; margin-right: 0; }
+@media (hover: hover) and (pointer: fine) { .proy-account-edit-btn:hover { background: var(--grey-2); color: var(--ink); } }
 .proy-account-item-hint { margin-left: auto; font-size: var(--fs-xs); color: var(--text-muted); }
-.proy-account-item-danger { color: var(--hilti-red); }
+.proy-tema-opciones { display: flex; gap: 6px; padding: 8px 14px 10px; }
+.proy-tema-opciones .btn-tema-opt { flex: 1; padding: 7px 4px; font-size: var(--fs-xs); }
+.proy-acerca-texto { padding: 8px 14px 12px; font-size: var(--fs-2xs); color: var(--text-secondary); line-height: 1.6; margin: 0; }
+.proy-account-logout-fila { display: flex; justify-content: flex-end; padding: 8px 10px; }
+.proy-account-logout-link { background: none; border: none; color: var(--hilti-red); font-size: var(--fs-xs); font-weight: 600; cursor: pointer; padding: 4px 6px; }
 
 /* --- Pantalla de Login (Firebase Auth) --- */
 .pantalla-login-overlay { position: fixed; inset: 0; z-index: 8500; background: var(--surface); display: flex; align-items: center; justify-content: center; padding: 16px; overflow-y: auto; opacity: 0; transition: opacity .2s ease; }
