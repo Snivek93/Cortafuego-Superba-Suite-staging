@@ -186,6 +186,40 @@ async function subirPlano(file) {
   return plano;
 }
 
+// Sube uno o varios PDFs en secuencia (no en paralelo, para no pisar
+// PLANO_SEQ entre sí) — usada tanto por el picker de archivos como por
+// arrastrar-y-soltar en desktop.
+async function subirVariosPlanos(fileList) {
+  const archivos = Array.from(fileList || []).filter(f => f.type === "application/pdf" || /\.pdf$/i.test(f.name || ""));
+  if (!archivos.length) {
+    mostrarToast("Solo se pueden subir archivos PDF.", "error");
+    return;
+  }
+  mostrarCargandoPlano(true);
+  let ultimoPlano = null;
+  let fallidos = 0;
+  try {
+    for (const file of archivos) {
+      try {
+        ultimoPlano = await subirPlano(file);
+        marcarCambio();
+      } catch (e) {
+        fallidos++;
+      }
+    }
+  } finally {
+    mostrarCargandoPlano(false);
+  }
+  if (fallidos) mostrarToast(`No se pudo procesar ${fallidos} archivo(s) (¿son PDF válidos?).`, "error");
+  if (archivos.length - fallidos > 1) {
+    renderVisorPlanos();
+  } else if (ultimoPlano) {
+    abrirPlanoDesdeGaleria(ultimoPlano.id);
+  } else {
+    renderVisorPlanos();
+  }
+}
+
 // Abre el visor de planos. opts.filaId/opts.filaTipo (opcional): si vienen,
 // el visor arranca en modo "punto" listo para vincular el próximo pin
 // directo a esa fila (sin preguntar nota libre vs. vincular).
@@ -420,7 +454,8 @@ function cursorParaModo(modo) {
 function renderGaleriaPlanos() {
   const ordenados = planosOrdenados();
   return `
-    <div class="planos-galeria-wrap">
+    <div class="planos-galeria-wrap" id="planos-galeria-wrap">
+      <div class="planos-galeria-drop-hint" id="planos-galeria-drop-hint">Soltá el o los PDF acá para subirlos</div>
       ${!ordenados.length ? `<p class="planos-galeria-vacio-msg">Todavía no subiste ningún plano — subí el primero para empezar a marcarlo.</p>` : ""}
       <div class="planos-galeria-grid">
         ${ordenados.map(p => `
@@ -445,7 +480,7 @@ function renderGaleriaPlanos() {
         <label class="planos-galeria-card planos-galeria-card-nueva" for="planos-input-subir-galeria">
           <span class="planos-galeria-card-nueva-icono"><svg class="icon"><use href="#i-upload"/></svg></span>
           <span>Subir plano (PDF)</span>
-          <input type="file" accept="application/pdf" id="planos-input-subir-galeria" class="lev-foto-input-oculto">
+          <input type="file" accept="application/pdf" id="planos-input-subir-galeria" class="lev-foto-input-oculto" multiple>
         </label>
       </div>
     </div>
@@ -822,21 +857,37 @@ function attachVisorPlanosEvents(overlay) {
     const input = document.getElementById(id);
     if (!input) return;
     input.addEventListener("change", async () => {
-      const file = input.files && input.files[0];
-      if (!file) return;
-      mostrarCargandoPlano(true);
-      try {
-        const plano = await subirPlano(file);
-        marcarCambio();
-        abrirPlanoDesdeGaleria(plano.id);
-      } catch (e) {
-        mostrarToast("No se pudo procesar el PDF del plano.", "error");
-      } finally {
-        mostrarCargandoPlano(false);
-        renderVisorPlanos();
-      }
+      if (!input.files || !input.files.length) return;
+      await subirVariosPlanos(input.files);
+      input.value = "";
     });
   });
+
+  // Arrastrar y soltar (desktop) — sobre toda la galería, no solo la
+  // tarjeta de "Subir plano". En touch estos eventos simplemente no se
+  // disparan, no hace falta distinguir dispositivo.
+  const galeriaWrap = document.getElementById("planos-galeria-wrap");
+  if (galeriaWrap) {
+    let dragCounter = 0;
+    galeriaWrap.addEventListener("dragenter", (e) => {
+      e.preventDefault();
+      dragCounter++;
+      galeriaWrap.classList.add("planos-galeria-dragover");
+    });
+    galeriaWrap.addEventListener("dragover", (e) => e.preventDefault());
+    galeriaWrap.addEventListener("dragleave", () => {
+      dragCounter = Math.max(0, dragCounter - 1);
+      if (dragCounter === 0) galeriaWrap.classList.remove("planos-galeria-dragover");
+    });
+    galeriaWrap.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      dragCounter = 0;
+      galeriaWrap.classList.remove("planos-galeria-dragover");
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+        await subirVariosPlanos(e.dataTransfer.files);
+      }
+    });
+  }
 
   document.querySelectorAll("[data-planos-modo]").forEach(btn => {
     btn.addEventListener("click", () => {
