@@ -848,14 +848,19 @@ button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
 .pantalla-login-overlay { position: fixed; inset: 0; z-index: 8500; background: var(--surface); display: flex; align-items: center; justify-content: center; padding: 16px; overflow-y: auto; }
 .pantalla-login-overlay[hidden] { display: none; }
 .auth-panel { background: var(--surface-raised); border-radius: var(--radius-lg); border: 1px solid var(--border); padding: 28px 22px 22px; max-width: 320px; width: 100%; margin: auto; }
-.auth-brand { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-bottom: 22px; }
-.auth-brand-mark { width: 48px; height: 48px; border-radius: 12px; background: var(--bar-bg); display: flex; align-items: center; justify-content: center; margin-bottom: 6px; }
-.auth-brand-mark .icon { width: 22px; height: 22px; margin-right: 0; color: var(--hilti-red); }
+.auth-brand { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-bottom: 18px; }
+.auth-brand-logo { width: 56px; height: 56px; border-radius: 14px; margin-bottom: 6px; }
 .auth-brand-title { font-size: var(--fs-md); font-weight: 600; color: var(--ink); margin: 0; }
 .auth-brand-sub { font-size: var(--fs-2xs); color: var(--text-muted); letter-spacing: 0.04em; margin: 0; }
+.auth-tabs { display: flex; background: var(--grey-1); border-radius: var(--radius); padding: 3px; gap: 3px; margin-bottom: 14px; }
+.auth-tab { flex: 1; border: none; background: transparent; color: var(--text-secondary); font-size: var(--fs-sm); font-weight: 600; padding: 8px 6px; border-radius: var(--radius-sm); cursor: pointer; }
+.auth-tab.active { background: var(--surface-raised); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.auth-mode-title { text-align: center; font-size: var(--fs-sm); color: var(--text-secondary); margin: 0 0 14px; }
+.auth-hint { font-size: var(--fs-xs); color: var(--text-muted); margin: -4px 0 0; }
 #auth-form { display: flex; flex-direction: column; gap: 10px; }
 #auth-form input { width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: var(--fs-base); background: var(--surface-raised); color: var(--ink); }
 .auth-btn-submit { width: 100%; margin-top: 4px; }
 .auth-error { color: var(--err); background: var(--err-bg); border-radius: var(--radius-sm); padding: 8px 10px; font-size: var(--fs-sm); margin: 0; }
-.auth-switch { text-align: center; font-size: var(--fs-sm); color: var(--text-muted); margin: 16px 0 0; }
-.auth-btn-switch { background: none; border: none; color: var(--hilti-red); font-weight: 600; font-size: var(--fs-sm); cursor: pointer; padding: 0 0 0 4px; }
+.proy-cuenta { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; margin: -6px 0 14px; background: var(--grey-1); border-radius: var(--radius-sm); }
+.proy-cuenta-email { font-size: var(--fs-xs); color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.proy-btn-logout { flex-shrink: 0; background: none; border: none; color: var(--hilti-red); font-size: var(--fs-xs); font-weight: 600; cursor: pointer; padding: 2px 0 2px 8px; }
