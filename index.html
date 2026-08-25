@@ -45,6 +45,7 @@
   <symbol id="i-chevron-down" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></symbol>
   <symbol id="i-chevron-right" viewBox="0 0 24 24"><polyline points="9 6 15 12 9 18"/></symbol>
   <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v9a1 1 0 0 0 1 1H10v-6h4v6h3.5a1 1 0 0 0 1-1v-9"/></symbol>
+  <symbol id="i-building-crane" viewBox="0 0 24 24"><rect x="4" y="10" width="7" height="11"/><line x1="6.5" y1="10" x2="6.5" y2="14"/><line x1="9" y1="10" x2="9" y2="14"/><line x1="6.5" y1="17" x2="6.5" y2="21"/><line x1="9" y1="17" x2="9" y2="21"/><polyline points="14 21 14 4 21 4 21 8 17 8"/><line x1="14" y1="8" x2="19" y2="8"/><line x1="19" y1="8" x2="19" y2="11"/></symbol>
   <symbol id="i-arrow-left" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></symbol>
@@ -173,20 +174,19 @@
     <div class="dropdown" id="dropdown-pdf">
       <button class="header-icon-btn" id="btn-menu-pdf" title="PDF" aria-label="PDF"><svg class="icon"><use href="#i-download"/></svg></button>
       <div class="dropdown-panel" id="dropdown-panel-pdf">
-        <button class="dropdown-item" id="btn-pdf-completo"><svg class="icon"><use href="#i-download"/></svg>Informe completo</button>
-        <button class="dropdown-item" id="btn-pdf-levantamiento"><svg class="icon"><use href="#i-download"/></svg>Levantamiento detallado</button>
-        <button class="dropdown-item" id="btn-pdf-levantamiento-resumido"><svg class="icon"><use href="#i-download"/></svg>Levantamiento resumido</button>
-        <button class="dropdown-item" id="btn-pdf-resumen"><svg class="icon"><use href="#i-download"/></svg>Solo resumen</button>
+        <p class="dropdown-section-title">Informes</p>
+        <button class="dropdown-item dropdown-item-share" id="btn-pdf-completo"><svg class="icon"><use href="#i-download"/></svg>Informe completo<svg class="icon icon-share"><use href="#i-share"/></svg></button>
+        <button class="dropdown-item dropdown-item-share" id="btn-pdf-levantamiento"><svg class="icon"><use href="#i-download"/></svg>Levantamiento detallado<svg class="icon icon-share"><use href="#i-share"/></svg></button>
+        <button class="dropdown-item dropdown-item-share" id="btn-pdf-levantamiento-resumido"><svg class="icon"><use href="#i-download"/></svg>Levantamiento resumido<svg class="icon icon-share"><use href="#i-share"/></svg></button>
+        <button class="dropdown-item dropdown-item-share" id="btn-pdf-resumen"><svg class="icon"><use href="#i-download"/></svg>Solo resumen<svg class="icon icon-share"><use href="#i-share"/></svg></button>
         <div class="dropdown-sep"></div>
-        <button class="dropdown-item" id="btn-pdf-memoria"><svg class="icon"><use href="#i-download"/></svg>Memoria de Cálculo</button>
-        <div class="dropdown-sep"></div>
-        <button class="dropdown-item" id="btn-descargar-submittal"><svg class="icon"><use href="#i-clipboard"/></svg>Submittal</button>
-        <div class="dropdown-sep"></div>
-        <button class="dropdown-item" id="btn-pdf-planos"><svg class="icon"><use href="#i-download"/></svg>Solo planos</button>
+        <p class="dropdown-section-title">Técnicos</p>
+        <button class="dropdown-item dropdown-item-share" id="btn-pdf-memoria"><svg class="icon"><use href="#i-download"/></svg>Memoria de Cálculo<svg class="icon icon-share"><use href="#i-share"/></svg></button>
+        <button class="dropdown-item dropdown-item-share" id="btn-descargar-submittal"><svg class="icon"><use href="#i-clipboard"/></svg>Submittal<svg class="icon icon-share"><use href="#i-share"/></svg></button>
+        <button class="dropdown-item dropdown-item-share" id="btn-pdf-planos"><svg class="icon"><use href="#i-download"/></svg>Solo planos<svg class="icon icon-share"><use href="#i-share"/></svg></button>
       </div>
     </div>
     <div class="header-spacer"></div>
-    <button class="secondary mobile-only-btn" id="btn-compartir" title="Compartir"><svg class="icon"><use href="#i-share"/></svg><span class="btn-label">Compartir</span></button>
     <button class="secondary icon-only-btn" id="btn-configuracion" title="Configuración"><svg class="icon"><use href="#i-gear"/></svg></button>
     <span id="save-status" class="save-status" title="Sin guardar cambios aún">
       <span class="save-status-icon-wrap">
@@ -213,6 +213,20 @@
       <button type="button" id="btn-cerrar-config" title="Cerrar"><svg class="icon"><use href="#i-close"/></svg></button>
     </div>
     <div class="instr-modal-content" style="padding:20px 24px;display:flex;flex-direction:column;gap:18px">
+      <div class="cfg-group" id="cfg-cuenta-group">
+        <div class="cfg-group-title">Cuenta</div>
+        <div class="cfg-cuenta-fila">
+          <div class="cfg-cuenta-avatar" id="cfg-cuenta-avatar">?</div>
+          <div class="cfg-cuenta-info">
+            <p class="cfg-cuenta-nombre" id="cfg-cuenta-nombre">—</p>
+            <p class="cfg-cuenta-email" id="cfg-cuenta-email"></p>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+          <button type="button" class="secondary" id="cfg-btn-editar-perfil"><svg class="icon"><use href="#i-edit"/></svg>Editar perfil</button>
+          <button type="button" class="danger" id="cfg-btn-cerrar-sesion"><svg class="icon"><use href="#i-close"/></svg>Cerrar sesión</button>
+        </div>
+      </div>
       <div class="cfg-group">
         <div class="cfg-group-title">Tema</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
