@@ -130,7 +130,7 @@ async function renderPantallaProyectos(permitirCerrar) {
     ? `<p class="proy-section-title">Borradores</p><div class="proy-lista">${borradores.map(p => tarjetaHTML(p.id, p.data, true)).join("")}</div>`
     : "";
   const vacio = (!proyectos.length && !borradores.length)
-    ? `<div class="proy-vacio"><svg class="icon proy-vacio-icono"><use href="#i-building-crane"/></svg><p>Todavía no tenés proyectos.<br>Creá el primero con el botón de abajo.</p></div>`
+    ? `<div class="proy-vacio"><svg class="icon proy-vacio-icono"><use href="#i-folder"/></svg><p>Todavía no tenés proyectos.<br>Creá el primero con el botón de abajo.</p></div>`
     : "";
 
   overlay.innerHTML = `
@@ -138,7 +138,7 @@ async function renderPantallaProyectos(permitirCerrar) {
       <div class="proy-header-full-left">
         ${permitirCerrar
           ? `<button type="button" class="proy-header-icon-btn" id="proy-btn-cerrar" title="Volver" aria-label="Volver"><svg class="icon"><use href="#i-arrow-left"/></svg></button>`
-          : `<div class="proy-header-mark-full"><svg class="icon"><use href="#i-building-crane"/></svg></div>`}
+          : `<div class="proy-header-mark-full"><img class="proy-header-mark-logo" src="icons/icon-192.png" alt="Firestop Suite" width="24" height="24" /></div>`}
         <div>
           <p class="proy-header-full-title">Proyectos</p>
           <p class="proy-header-full-sub">Firestop Suite · Superba</p>
