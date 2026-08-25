@@ -186,6 +186,25 @@ async function subirPlano(file) {
   return plano;
 }
 
+// Versión liviana de subirVariosPlanos: solo parsea y agrega a PLANOS, sin
+// tocar PLANO_VISTA/PLANO_ACTIVO_ID ni el DOM del visor. Para usar desde
+// otros módulos (ej. Informes de Acreditación) que quieren subir un plano
+// sin abrir la pantalla completa de Planos.
+async function subirVariosPlanosBasico(fileList) {
+  const archivos = Array.from(fileList || []).filter(f => f.type === "application/pdf" || /\.pdf$/i.test(f.name || ""));
+  const subidos = [];
+  let fallidos = 0;
+  for (const file of archivos) {
+    try {
+      subidos.push(await subirPlano(file));
+      marcarCambio();
+    } catch (e) {
+      fallidos++;
+    }
+  }
+  return { subidos, fallidos, totalIntentados: archivos.length };
+}
+
 // Sube uno o varios PDFs en secuencia (no en paralelo, para no pisar
 // PLANO_SEQ entre sí) — usada tanto por el picker de archivos como por
 // arrastrar-y-soltar en desktop.
@@ -1980,6 +1999,8 @@ function confirmarPinPendiente(pendiente, filaId, filaTipo) {
 
 // --- Exports usados por otros módulos ---
 window.abrirVisorPlanos = abrirVisorPlanos;
+window.subirVariosPlanos = subirVariosPlanos;
+window.subirVariosPlanosBasico = subirVariosPlanosBasico;
 window.abrirVisorPlanosConCapaInforme = abrirVisorPlanosConCapaInforme;
 window.abrirVisorPlanosEnPin = abrirVisorPlanosEnPin;
 window.exportarPlanosPDF = exportarPlanosPDF;

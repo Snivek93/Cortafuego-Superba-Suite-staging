@@ -1073,8 +1073,13 @@ function abrirPlanoDelInforme(planoId) {
 
 function renderSeccionPlanosHTML() {
   const planos = window.PLANOS || [];
+  const botonAgregar = `
+    <label class="secondary acr-btn-agregar-plano" for="acr-input-subir-plano">
+      <svg class="icon"><use href="#i-upload"/></svg>Agregar plano (PDF)
+      <input type="file" accept="application/pdf" id="acr-input-subir-plano" class="lev-foto-input-oculto" multiple>
+    </label>`;
   if (!planos.length) {
-    return `<p class="hint">No hay planos cargados en este proyecto. Subí un plano PDF desde el módulo Planos y volvé acá para anotarlo.</p>`;
+    return `<p class="hint">Todavía no hay planos cargados en este proyecto.</p>${botonAgregar}`;
   }
   const refs = ACR_DRAFT.planoRefs || [];
   const items = planos.map(p => {
@@ -1113,7 +1118,7 @@ function renderSeccionPlanosHTML() {
         ` : ""}
       </div>` : ""}`;
   }).join("");
-  return `<div class="acr-planos-lista">${items}</div>`;
+  return `<div class="acr-planos-lista">${items}</div>${botonAgregar}`;
 }
 
 function abrirModalTextoInforme() {
@@ -1772,6 +1777,18 @@ function bindCamposTexto(cont) {
   if (inputZona) inputZona.addEventListener("keydown", (evt) => { if (evt.key === "Enter") { evt.preventDefault(); agregarZonaDesdeInput(); } });
   const inputFotos = document.getElementById("acr-input-fotos");
   if (inputFotos) inputFotos.addEventListener("change", (evt) => { agregarFotosDesdeArchivos(evt.target.files); evt.target.value = ""; });
+  const inputPlano = document.getElementById("acr-input-subir-plano");
+  if (inputPlano) inputPlano.addEventListener("change", async (evt) => {
+    const files = evt.target.files;
+    if (!files || !files.length || !window.subirVariosPlanosBasico) { evt.target.value = ""; return; }
+    const resultado = await window.subirVariosPlanosBasico(files);
+    evt.target.value = "";
+    if (resultado.fallidos) mostrarToast(`No se pudo procesar ${resultado.fallidos} archivo(s) (¿son PDF válidos?).`, "error");
+    if (resultado.subidos.length) {
+      mostrarToast(resultado.subidos.length === 1 ? "Plano agregado." : `${resultado.subidos.length} planos agregados.`);
+      renderAcreditacion();
+    }
+  });
   const inputTexto = document.getElementById("acr-editor-texto-input");
   if (inputTexto) {
     inputTexto.addEventListener("keydown", (evt) => { if (evt.key === "Enter") { evt.preventDefault(); colocarTextoPendiente(); } });
