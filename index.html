@@ -43,6 +43,8 @@
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></symbol>
   <symbol id="i-close" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
   <symbol id="i-chevron-down" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><polyline points="9 6 15 12 9 18"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v9a1 1 0 0 0 1 1H10v-6h4v6h3.5a1 1 0 0 0 1-1v-9"/></symbol>
   <symbol id="i-arrow-left" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></symbol>
@@ -146,41 +148,30 @@
     <input type="date" id="proj-fecha">
   </div>
   <div class="header-actions">
-    <span id="save-status" class="save-status" title="Sin guardar cambios aún">
-      <span class="save-status-icon-wrap">
-        <svg class="icon"><use href="#i-save"/></svg>
-        <span id="save-status-badge" class="save-status-badge pending">✕</span>
-      </span>
-      <span id="save-status-time"></span>
-    </span>
+    <button class="header-icon-btn" id="btn-home" title="Proyectos" aria-label="Proyectos"><svg class="icon"><use href="#i-home"/></svg></button>
     <div class="dropdown" id="dropdown-proyecto">
-      <button class="secondary" id="btn-menu-proyecto" title="Archivo"><svg class="icon"><use href="#i-folder"/></svg><span class="btn-label">Archivo</span> <svg class="icon icon-chevron"><use href="#i-chevron-down"/></svg></button>
+      <button class="header-icon-btn" id="btn-menu-proyecto" title="Archivo" aria-label="Archivo"><svg class="icon"><use href="#i-folder"/></svg></button>
       <div class="dropdown-panel" id="dropdown-panel-proyecto">
-        <button class="dropdown-item" id="btn-mis-proyectos"><svg class="icon"><use href="#i-list"/></svg>Mis proyectos</button>
+        <button class="dropdown-item" id="btn-archivo-nuevo"><svg class="icon"><use href="#i-plus"/></svg>Nuevo proyecto</button>
         <div class="dropdown-sep"></div>
-        <button class="dropdown-item" id="btn-archivo-nuevo"><svg class="icon"><use href="#i-plus"/></svg>Nuevo</button>
         <button class="dropdown-item" id="btn-archivo-abrir"><svg class="icon"><use href="#i-folder"/></svg>Abrir&hellip;</button>
-        <button class="dropdown-item" id="btn-archivo-guardar"><svg class="icon"><use href="#i-download"/></svg>Guardar</button>
         <button class="dropdown-item" id="btn-archivo-guardar-como"><svg class="icon"><use href="#i-download"/></svg>Guardar como&hellip;</button>
         <div class="dropdown-sep"></div>
-        <button class="dropdown-item" id="btn-export-json"><svg class="icon"><use href="#i-download"/></svg>Exportar datos (.fss)</button>
-        <button class="dropdown-item" id="btn-import-json"><svg class="icon"><use href="#i-upload"/></svg>Importar datos (.fss)</button>
-        <div class="dropdown-sep"></div>
-        <button class="dropdown-item" id="btn-import-excel"><svg class="icon"><use href="#i-upload"/></svg>Cargar desde Excel</button>
-        <button class="dropdown-item" id="btn-export-excel"><svg class="icon"><use href="#i-download"/></svg>Exportar Penetrantes en Excel</button>
-        <button class="dropdown-item" id="btn-export-excel-lev-pen"><svg class="icon"><use href="#i-download"/></svg>Exportar Levantamiento Penetrantes en Excel</button>
-        <button class="dropdown-item" id="btn-export-excel-lev-juntas"><svg class="icon"><use href="#i-download"/></svg>Exportar Levantamiento Juntas en Excel</button>
-        <button class="dropdown-item" id="btn-import-txt"><svg class="icon"><use href="#i-upload"/></svg>Cargar desde texto</button>
-        <div class="dropdown-sep"></div>
-        <button class="dropdown-item" id="btn-cerrar-sesion"><svg class="icon"><use href="#i-close"/></svg>Cerrar sesión</button>
+        <button class="dropdown-item dropdown-item-sub" id="btn-toggle-excel-texto"><svg class="icon"><use href="#i-database"/></svg>Excel y texto<svg class="icon icon-chevron-right"><use href="#i-chevron-right"/></svg></button>
+        <div class="dropdown-sub-panel" id="dropdown-sub-panel-excel">
+          <button class="dropdown-item" id="btn-import-excel"><svg class="icon"><use href="#i-upload"/></svg>Cargar desde Excel</button>
+          <button class="dropdown-item" id="btn-export-excel"><svg class="icon"><use href="#i-download"/></svg>Exportar Penetrantes en Excel</button>
+          <button class="dropdown-item" id="btn-export-excel-lev-pen"><svg class="icon"><use href="#i-download"/></svg>Exportar Levantamiento Penetrantes en Excel</button>
+          <button class="dropdown-item" id="btn-export-excel-lev-juntas"><svg class="icon"><use href="#i-download"/></svg>Exportar Levantamiento Juntas en Excel</button>
+          <button class="dropdown-item" id="btn-import-txt"><svg class="icon"><use href="#i-upload"/></svg>Cargar desde texto</button>
+        </div>
       </div>
-      <input type="file" id="file-abrir-proyecto" accept=".html,text/html,.json,application/json" hidden>
       <input type="file" id="file-import-json" accept=".fss,.json,application/json" hidden>
       <input type="file" id="file-import-excel" accept=".xlsx,.xlsm,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12,application/vnd.ms-excel" hidden>
       <input type="file" id="file-import-txt" accept=".txt,text/plain" hidden>
     </div>
     <div class="dropdown" id="dropdown-pdf">
-      <button class="secondary" id="btn-menu-pdf" title="PDF"><svg class="icon"><use href="#i-download"/></svg><span class="btn-label">PDF</span> <svg class="icon icon-chevron"><use href="#i-chevron-down"/></svg></button>
+      <button class="header-icon-btn" id="btn-menu-pdf" title="PDF" aria-label="PDF"><svg class="icon"><use href="#i-download"/></svg></button>
       <div class="dropdown-panel" id="dropdown-panel-pdf">
         <button class="dropdown-item" id="btn-pdf-completo"><svg class="icon"><use href="#i-download"/></svg>Informe completo</button>
         <button class="dropdown-item" id="btn-pdf-levantamiento"><svg class="icon"><use href="#i-download"/></svg>Levantamiento detallado</button>
@@ -194,8 +185,16 @@
         <button class="dropdown-item" id="btn-pdf-planos"><svg class="icon"><use href="#i-download"/></svg>Solo planos</button>
       </div>
     </div>
-    <button class="secondary" id="btn-compartir" title="Compartir"><svg class="icon"><use href="#i-share"/></svg><span class="btn-label">Compartir</span></button>
+    <div class="header-spacer"></div>
+    <button class="secondary mobile-only-btn" id="btn-compartir" title="Compartir"><svg class="icon"><use href="#i-share"/></svg><span class="btn-label">Compartir</span></button>
     <button class="secondary icon-only-btn" id="btn-configuracion" title="Configuración"><svg class="icon"><use href="#i-gear"/></svg></button>
+    <span id="save-status" class="save-status" title="Sin guardar cambios aún">
+      <span class="save-status-icon-wrap">
+        <svg class="icon"><use href="#i-save"/></svg>
+        <span id="save-status-badge" class="save-status-badge pending">✕</span>
+      </span>
+      <span id="save-status-time"></span>
+    </span>
   </div>
 </header>
 
