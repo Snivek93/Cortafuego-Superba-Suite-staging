@@ -86,9 +86,22 @@ function abrirIDB() {
       if (!db.objectStoreNames.contains(IDB_STORE_PROYECTOS)) db.createObjectStore(IDB_STORE_PROYECTOS);
       if (!db.objectStoreNames.contains(IDB_STORE_META)) db.createObjectStore(IDB_STORE_META);
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error || new Error("No se pudo abrir IndexedDB"));
-    req.onblocked = () => reject(new Error("IndexedDB bloqueada por otra pestaña"));
+    req.onsuccess = () => {
+      const db = req.result;
+      // Si esta pestaña se queda abierta y OTRA pestaña/ventana de la misma
+      // app necesita abrir la base (ej. la reabriste en otro lado), esta
+      // conexión se cierra sola en vez de bloquear a la otra indefinidamente.
+      // Sin esto, dos pestañas abiertas a la vez podían dejarse mutuamente
+      // sin poder guardar ("IndexedDB bloqueada por otra pestaña").
+      db.onversionchange = () => {
+        db.close();
+        IDB_PROMESA = null;
+        avisarFalloGuardado(new Error("Esta pestaña quedó vieja (se abrió la app en otro lado). Recargá la página."));
+      };
+      resolve(db);
+    };
+    req.onerror = () => { IDB_PROMESA = null; reject(req.error || new Error("No se pudo abrir IndexedDB")); };
+    req.onblocked = () => { IDB_PROMESA = null; reject(new Error("IndexedDB bloqueada por otra pestaña — cerrá las demás pestañas de esta app y volvé a intentar.")); };
   });
   return IDB_PROMESA;
 }
