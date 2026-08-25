@@ -110,24 +110,74 @@ function aplicarProyectoImportado(data) {
   mostrarToast(`Proyecto cargado: ${ROWS.length} fila(s).`);
 }
 
-function importarProyectoJSON(file) {
+function pedirEleccion(mensaje, opciones, onElegir) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  const botones = opciones.map(o => `<button class="${o.clase || "secondary"}" data-act="${o.act}">${escapeHtml(o.label)}</button>`).join("");
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <p>${escapeHtml(mensaje)}</p>
+      <div class="modal-actions">${botones}</div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) { overlay.remove(); return; }
+    const act = e.target.dataset.act;
+    if (act) { overlay.remove(); onElegir(act); }
+  });
+}
+
+// "Abrir…" importa un .fss como PROYECTO NUEVO en la lista (no pisa el que
+// tenías abierto — eso era el comportamiento viejo de un solo proyecto).
+// Si el archivo trae el mismo id de un proyecto que ya tenés guardado
+// (ej. reimportás tu propio backup, o Sebastián te reenvía el mismo
+// archivo), pregunta si reemplazarlo o guardarlo aparte como copia.
+async function importarProyectoJSON(file) {
   const reader = new FileReader();
   reader.onerror = () => mostrarToast("No se pudo leer el archivo seleccionado.", "error");
-  reader.onload = () => {
+  reader.onload = async () => {
     let data;
     try {
       const contenido = desenmascararFSS(reader.result);
       data = JSON.parse(contenido);
       if (!data || !Array.isArray(data.filas)) throw new Error("Formato no reconocido");
     } catch (err) {
-      mostrarToast("No se pudo leer el archivo. Verificá que sea un .fss (o .json) exportado desde esta calculadora.", "error");
+      mostrarToast("No se pudo leer el archivo. Verificá que sea un .fss exportado desde esta calculadora.", "error");
       return;
     }
-    if (ROWS.length > 0) {
-      pedirConfirmacion("Esto va a reemplazar las filas actuales del proyecto. ¿Continuar?", () => aplicarProyectoImportado(data));
-    } else {
-      aplicarProyectoImportado(data);
+
+    const guardarComoProyecto = async (idAUsar) => {
+      try {
+        await window.idbGuardarProyecto(idAUsar, Object.assign({}, data, { id: idAUsar }));
+        await window.abrirProyectoExistente(idAUsar);
+        mostrarToast(`Proyecto importado: ${data.filas.length} fila(s).`);
+      } catch (e) {
+        mostrarToast("No se pudo guardar el proyecto importado: " + e.message, "error");
+      }
+    };
+
+    let existentes = [];
+    try { existentes = await window.idbListarProyectos(); } catch (e) { existentes = []; }
+    const yaExiste = data.id && existentes.some(p => p.id === data.id);
+
+    if (!yaExiste) {
+      const id = data.id || ("p_" + Date.now().toString(36) + "_importado");
+      await guardarComoProyecto(id);
+      return;
     }
+
+    pedirEleccion("Ya tenés un proyecto guardado de este mismo archivo. ¿Qué querés hacer?", [
+      { label: "Reemplazar", act: "reemplazar", clase: "danger" },
+      { label: "Guardar como copia", act: "copia", clase: "primary" },
+      { label: "Cancelar", act: "cancelar", clase: "secondary" },
+    ], async (eleccion) => {
+      if (eleccion === "reemplazar") {
+        await guardarComoProyecto(data.id);
+      } else if (eleccion === "copia") {
+        const nuevoId = "p_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
+        await guardarComoProyecto(nuevoId);
+      }
+    });
   };
   reader.readAsText(file);
 }

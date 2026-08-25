@@ -219,34 +219,9 @@ function cargarDatosEmbebidos() {
   }
 }
 
-function construirHTMLConDatos() {
-  const payload = datosProyectoActual();
-  const clone = document.documentElement.cloneNode(true);
-  const scriptTag = clone.querySelector("#embedded-project-data");
-  if (!scriptTag) throw new Error("No se encontró el punto de inserción de datos en la plantilla.");
-  scriptTag.textContent = JSON.stringify(payload).replace(/</g, "\\u003c");
-  return "<!DOCTYPE html>\n" + clone.outerHTML;
-}
-
-function nombreArchivoSugerido() {
-  const nombre = (PROJECT_INFO.nombre || "proyecto").replace(/[^a-z0-9\-_ ]/gi, "").trim().replace(/\s+/g, "-") || "proyecto";
-  return `${nombre}-cortafuego-app.html`;
-}
-
-function descargarAppConProyecto() {
-  try {
-    descargarArchivo(nombreArchivoSugerido(), construirHTMLConDatos(), "text/html");
-    mostrarToast("Aplicación descargada con tu proyecto ya cargado.");
-  } catch (err) {
-    mostrarToast("No se pudo generar el archivo: " + err.message, "error");
-  }
-}
-
 window.materialRecomendado = materialRecomendado;
 window.parseFraccion = parseFraccion;
 window.importarTxt = importarTxt;
 window.datosProyectoActual = datosProyectoActual;
 window.cargarDatosEmbebidos = cargarDatosEmbebidos;
-window.construirHTMLConDatos = construirHTMLConDatos;
-window.nombreArchivoSugerido = nombreArchivoSugerido;
 })();

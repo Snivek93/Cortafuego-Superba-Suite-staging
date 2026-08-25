@@ -7,18 +7,15 @@ var PROYECTO_ACTIVO_ID = null;
 var PROYECTO_ACTIVO_CREADO_EN = null;
 (function () {
 // ARCHIVO — Nuevo / Abrir / Guardar / Guardar como (comportamiento tipo Word)
-let CURRENT_FILE_HANDLE = null;
-let CURRENT_FILE_NAME = null;
 let ULTIMO_GUARDADO = null;
 let FALLO_AUTOGUARDADO = false;
-const FS_ACCESS_OK = typeof window.showSaveFilePicker === "function" && typeof window.showOpenFilePicker === "function";
 
 function actualizarIndicadorArchivo() {
   const badge = document.getElementById("save-status-badge");
   const timeEl = document.getElementById("save-status-time");
   const wrap = document.getElementById("save-status");
   if (!badge || !timeEl || !wrap) return;
-  const nombreTxt = CURRENT_FILE_NAME ? ` · ${CURRENT_FILE_NAME}` : "";
+  const nombreTxt = "";
   // El fallo de autoguardado manda sobre cualquier otro estado: si no se pudo
   // guardar, el indicador se queda en rojo hasta que un guardado funcione. Un
   // toast no sirve acá porque se va solo a los 4 segundos y el usuario puede
@@ -46,108 +43,6 @@ function actualizarIndicadorArchivo() {
 function marcarGuardado() {
   ULTIMO_GUARDADO = new Date();
   actualizarIndicadorArchivo();
-}
-
-async function guardarComoArchivo() {
-  let htmlStr;
-  try { htmlStr = construirHTMLConDatos(); } catch (err) { mostrarToast("No se pudo generar el archivo: " + err.message, "error"); return; }
-  const sugerido = nombreArchivoSugerido();
-  if (FS_ACCESS_OK) {
-    try {
-      const handle = await window.showSaveFilePicker({
-        suggestedName: sugerido,
-        types: [{ description: "Aplicación con proyecto (HTML)", accept: { "text/html": [".html"] } }]
-      });
-      const writable = await handle.createWritable();
-      await writable.write(htmlStr);
-      await writable.close();
-      CURRENT_FILE_HANDLE = handle;
-      CURRENT_FILE_NAME = handle.name;
-      marcarGuardado();
-      mostrarToast(`Guardado como "${handle.name}".`);
-    } catch (err) {
-      if (err.name !== "AbortError") mostrarToast("No se pudo guardar el archivo: " + err.message, "error");
-    }
-  } else {
-    descargarArchivo(sugerido, htmlStr, "text/html");
-    CURRENT_FILE_HANDLE = null;
-    CURRENT_FILE_NAME = sugerido;
-    marcarGuardado();
-    mostrarToast(`Descargado como "${sugerido}". "Guardar" lo volverá a descargar con este mismo nombre.`);
-  }
-}
-
-async function guardarArchivo() {
-  if (FS_ACCESS_OK && CURRENT_FILE_HANDLE) {
-    try {
-      const htmlStr = construirHTMLConDatos();
-      const writable = await CURRENT_FILE_HANDLE.createWritable();
-      await writable.write(htmlStr);
-      await writable.close();
-      marcarGuardado();
-      mostrarToast(`Guardado en "${CURRENT_FILE_HANDLE.name}".`);
-      return;
-    } catch (err) {
-      mostrarToast("No se pudo guardar en el archivo original. Elegí dónde guardar de nuevo.", "error");
-      CURRENT_FILE_HANDLE = null;
-    }
-  }
-  if (!FS_ACCESS_OK && CURRENT_FILE_NAME) {
-    let htmlStr;
-    try { htmlStr = construirHTMLConDatos(); } catch (err) { mostrarToast("No se pudo generar el archivo: " + err.message, "error"); return; }
-    descargarArchivo(CURRENT_FILE_NAME, htmlStr, "text/html");
-    marcarGuardado();
-    mostrarToast(`Guardado como "${CURRENT_FILE_NAME}".`);
-    return;
-  }
-  await guardarComoArchivo();
-}
-
-function extraerDatosDeHTML(texto) {
-  const match = texto.match(/<script[^>]*id=["']embedded-project-data["'][^>]*>([\s\S]*?)<\/script>/i);
-  if (!match || !match[1].trim()) return null;
-  try { return JSON.parse(match[1]); } catch (e) { return null; }
-}
-
-async function procesarArchivoAbierto(file, handle) {
-  const texto = await file.text();
-  let data = null;
-  if (/\.json$/i.test(file.name)) {
-    try { data = JSON.parse(texto); } catch (e) { data = null; }
-  } else {
-    data = extraerDatosDeHTML(texto);
-  }
-  if (!data || !Array.isArray(data.filas)) {
-    mostrarToast("No se pudo leer el archivo. Verificá que sea un proyecto guardado desde esta calculadora.", "error");
-    return;
-  }
-  const aplicar = () => {
-    aplicarProyectoImportado(data);
-    CURRENT_FILE_HANDLE = handle || null;
-    CURRENT_FILE_NAME = file.name;
-    marcarGuardado();
-  };
-  if (ROWS.length > 0 || ROWS_J.length > 0) {
-    pedirConfirmacion("Esto va a reemplazar el proyecto actual (sin guardar) por el del archivo. ¿Continuar?", aplicar);
-  } else {
-    aplicar();
-  }
-}
-
-async function abrirArchivo() {
-  if (FS_ACCESS_OK) {
-    try {
-      const [handle] = await window.showOpenFilePicker({
-        types: [{ description: "Aplicación con proyecto (HTML o JSON)", accept: { "text/html": [".html"], "application/json": [".json"] } }]
-      });
-      const file = await handle.getFile();
-      await procesarArchivoAbierto(file, handle);
-    } catch (err) {
-      if (err.name !== "AbortError") mostrarToast("No se pudo abrir el archivo: " + err.message, "error");
-    }
-  } else {
-    document.getElementById("file-abrir-proyecto").click();
-  }
 }
 
 async function nuevoProyecto() {
@@ -433,8 +328,6 @@ async function abrirProyectoExistente(id) {
   PROYECTO_ACTIVO_CREADO_EN = data.creadoEn || data.guardadoEn || new Date().toISOString();
   try { await idbGuardarActivo(id); } catch (e) { /* best-effort: si falla, se reintenta el próximo guardado */ }
   cargarProyectoEnApp(data);
-  CURRENT_FILE_HANDLE = null;
-  CURRENT_FILE_NAME = null;
   UNDO_STACK.length = 0;
   actualizarBotonDeshacer();
   ULTIMO_GUARDADO = data.guardadoEn ? new Date(data.guardadoEn) : null;
@@ -462,8 +355,6 @@ async function crearYAbrirProyectoNuevo() {
   const pf = document.getElementById("proj-fecha"); if (pf) pf.value = "";
   renderTable();
   renderLevantamientoTab();
-  CURRENT_FILE_HANDLE = null;
-  CURRENT_FILE_NAME = null;
   UNDO_STACK.length = 0;
   actualizarBotonDeshacer();
   ULTIMO_GUARDADO = null;
@@ -768,27 +659,21 @@ async function initApp() {
   document.getElementById("btn-pdf-planos").addEventListener("click", exportarPlanosPDF);
 
   document.getElementById("btn-archivo-nuevo").addEventListener("click", nuevoProyecto);
-  const btnMisProyectos = document.getElementById("btn-mis-proyectos");
-  if (btnMisProyectos) btnMisProyectos.addEventListener("click", () => { if (window.mostrarPantallaProyectos) window.mostrarPantallaProyectos(); });
-  const btnCerrarSesion = document.getElementById("btn-cerrar-sesion");
-  if (btnCerrarSesion) btnCerrarSesion.addEventListener("click", () => {
-    if (window.pedirConfirmacion) {
-      pedirConfirmacion("¿Cerrar sesión?", () => { if (window.cerrarSesion) cerrarSesion(); });
-    } else if (confirm("¿Cerrar sesión?")) {
-      if (window.cerrarSesion) cerrarSesion();
-    }
-  });
-  document.getElementById("btn-archivo-abrir").addEventListener("click", abrirArchivo);
-  document.getElementById("btn-archivo-guardar").addEventListener("click", guardarArchivo);
-  document.getElementById("btn-archivo-guardar-como").addEventListener("click", guardarComoArchivo);
-  document.getElementById("file-abrir-proyecto").addEventListener("change", (e) => {
-    if (e.target.files[0]) procesarArchivoAbierto(e.target.files[0], null);
-    e.target.value = "";
-  });
-  document.getElementById("btn-export-json").addEventListener("click", exportarProyectoJSON);
-  document.getElementById("btn-import-json").addEventListener("click", () => {
+  const btnHome = document.getElementById("btn-home");
+  if (btnHome) btnHome.addEventListener("click", () => { if (window.mostrarPantallaProyectos) window.mostrarPantallaProyectos(); });
+  document.getElementById("btn-archivo-abrir").addEventListener("click", () => {
     document.getElementById("file-import-json").click();
   });
+  document.getElementById("btn-archivo-guardar-como").addEventListener("click", exportarProyectoJSON);
+  const btnToggleExcel = document.getElementById("btn-toggle-excel-texto");
+  const subPanelExcel = document.getElementById("dropdown-sub-panel-excel");
+  if (btnToggleExcel && subPanelExcel) {
+    btnToggleExcel.addEventListener("click", (e) => {
+      e.stopPropagation();
+      subPanelExcel.classList.toggle("open");
+      btnToggleExcel.classList.toggle("open");
+    });
+  }
   document.getElementById("btn-import-excel").addEventListener("click", () => {
     document.getElementById("file-import-excel").click();
   });
@@ -849,6 +734,7 @@ window.UNDO_STACK = UNDO_STACK;
 window.pushUndo = pushUndo;
 window.deshacerCambio = deshacerCambio;
 window.idbListarProyectos = idbListarProyectos;
+window.idbGuardarProyecto = idbGuardarProyecto;
 window.idbBorrarProyecto = idbBorrarProyecto;
 window.idbLeerActivo = idbLeerActivo;
 window.idbGuardarActivo = idbGuardarActivo;
