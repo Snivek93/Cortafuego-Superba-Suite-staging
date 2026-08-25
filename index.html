@@ -492,6 +492,7 @@
         <button type="button" class="instr-tab-btn" id="instr-tab-btn-penetrantes" data-instr-tab="penetrantes">Penetrantes</button>
         <button type="button" class="instr-tab-btn" id="instr-tab-btn-juntas" data-instr-tab="juntas">Juntas</button>
         <button type="button" class="instr-tab-btn" id="instr-tab-btn-planos" data-instr-tab="planos">Planos</button>
+        <button type="button" class="instr-tab-btn" id="instr-tab-btn-informes" data-instr-tab="informes">Informes</button>
       </div>
 
       <div class="instr-tab-panel" id="instr-tab-panel-penetrantes" data-instr-panel="penetrantes">
@@ -620,6 +621,31 @@
       <p>Podés descargar el plano anotado como PDF, o compartirlo directamente, desde los botones de la parte superior del visor.</p>
 
       <p class="hint">Nota: esta sección es un primer borrador de instrucciones para Planos — revisala y avisame si querés que agregue o ajuste algo.</p>
+      </div>
+
+      <div class="instr-tab-panel" id="instr-tab-panel-informes" data-instr-panel="informes">
+      <h2>1. Avance o Final</h2>
+      <p>Cada informe se marca como de "Avance" o "Final" en Datos generales. El tipo cambia el título del PDF, la introducción y la conclusión. Si quedan hallazgos pendientes de resolver, la conclusión avisa que el proyecto "debe mejorarse" sin importar el tipo de informe.</p>
+
+      <h2>2. Datos generales</h2>
+      <p>Proyecto, Contratista, Ubicación, Fecha de visita, Empresa instaladora, Inspector y Acompañantes. Un informe nuevo hereda automáticamente la ubicación, instaladora, inspector y acompañantes del informe anterior del mismo proyecto — no hace falta volver a escribirlos cada visita.</p>
+
+      <h2>3. Elementos y checklist</h2>
+      <ul class="instr-list">
+        <li>Agregá cada tipo de penetrante o junta presente en el proyecto — el formulario te pide solo los datos relevantes según el tipo (diámetro, materialidad, posición, etc.), saltándose los pasos que no aplican.</li>
+        <li>Cada elemento aparece una sola vez en el checklist, con su estado de Cumple / No cumple y la opción de agregar una observación puntual.</li>
+      </ul>
+
+      <h2>4. Plano del recorrido</h2>
+      <p>Podés marcar sobre un plano las zonas o el recorrido revisado en la visita — esas marcas son exclusivas de este informe y no afectan los pines de Levantamiento ni de otros informes. Si el proyecto todavía no tiene ningún plano cargado (o querés agregar uno nuevo), usá el botón "Agregar plano" directo desde esta pantalla — no hace falta salir al módulo de Planos primero.</p>
+
+      <h2>5. Fotos</h2>
+      <p>Agregá fotos desde la cámara o la galería del dispositivo, marcalas o recortalas si hace falta, y arrastralas para reordenarlas — el orden final define la numeración ("Figura 1", "Figura 2"...) que sale en el PDF.</p>
+
+      <h2>6. Generar el PDF</h2>
+      <p>El informe arma el texto de cumplimiento automáticamente a partir de los elementos y sus materiales, con los hallazgos numerados (H-01, H-02...). Podés editar ese texto a mano antes de exportar. El PDF final incluye el plano marcado, el anexo fotográfico y un anexo de normativa con los sistemas UL usados en el proyecto.</p>
+
+      <p class="hint">Nota: esta sección es un primer borrador de instrucciones para Informes de Acreditación — revisala y avisame si querés que agregue o ajuste algo.</p>
       </div>
     </div>
   </div>
