@@ -224,10 +224,90 @@ function renderVerificar(user, mensaje) {
   });
 }
 
-function mostrarOverlay() { crearOverlaySiHaceFalta().hidden = false; }
+function iniciales(user) {
+  if (user && user.displayName) {
+    const partes = user.displayName.trim().split(/\s+/);
+    const a = partes[0] ? partes[0][0] : "";
+    const b = partes[1] ? partes[1][0] : "";
+    return (a + b).toUpperCase() || "?";
+  }
+  return (user && user.email ? user.email.slice(0, 2) : "?").toUpperCase();
+}
+
+// Rellena la ficha de cuenta dondequiera que se muestre (modal de
+// Configuración por ahora; la Pantalla de Proyectos arma su propio popup
+// leyendo usuarioActual()/iniciales() directo cuando se abre).
+function actualizarUICuenta() {
+  const user = firebase.auth().currentUser;
+  if (!user) return;
+  const avatar = document.getElementById("cfg-cuenta-avatar");
+  const nombre = document.getElementById("cfg-cuenta-nombre");
+  const email = document.getElementById("cfg-cuenta-email");
+  if (avatar) avatar.textContent = iniciales(user);
+  if (nombre) nombre.textContent = user.displayName || "Sin nombre";
+  if (email) email.textContent = user.email || "";
+}
+
+// --- Editar perfil (nombre y apellido, vía updateProfile de Firebase) ---
+function abrirEditarPerfil() {
+  const user = firebase.auth().currentUser;
+  if (!user) return;
+  const partesActuales = (user.displayName || "").trim().split(/\s+/);
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <p style="font-weight:600;margin:0 0 12px;">Editar perfil</p>
+      <label class="auth-field-label" for="perfil-nombre">Nombre</label>
+      <input type="text" id="perfil-nombre" value="${escapeHtml(partesActuales[0] || "")}" style="width:100%;box-sizing:border-box;height:40px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--fs-base);margin-bottom:10px;" />
+      <label class="auth-field-label" for="perfil-apellido">Apellido</label>
+      <input type="text" id="perfil-apellido" value="${escapeHtml(partesActuales.slice(1).join(" ") || "")}" style="width:100%;box-sizing:border-box;height:40px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--fs-base);margin-bottom:4px;" />
+      <p class="auth-error" id="perfil-error" style="display:none;"></p>
+      <div class="modal-actions">
+        <button class="secondary" data-act="cancel">Cancelar</button>
+        <button class="primary" data-act="guardar">Guardar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener("click", async (e) => {
+    if (e.target === overlay || e.target.dataset.act === "cancel") { overlay.remove(); return; }
+    if (e.target.dataset.act === "guardar") {
+      const nombre = document.getElementById("perfil-nombre").value.trim();
+      const apellido = document.getElementById("perfil-apellido").value.trim();
+      const errorEl = document.getElementById("perfil-error");
+      if (!nombre) {
+        errorEl.textContent = "Ingresá al menos el nombre.";
+        errorEl.style.display = "block";
+        return;
+      }
+      const btn = e.target;
+      btn.disabled = true;
+      try {
+        await user.updateProfile({ displayName: apellido ? `${nombre} ${apellido}` : nombre });
+        actualizarUICuenta();
+        if (window.actualizarCuentaProyectos) window.actualizarCuentaProyectos();
+        overlay.remove();
+        if (window.mostrarToast) mostrarToast("Perfil actualizado.");
+      } catch (err) {
+        errorEl.textContent = mensajeError(err);
+        errorEl.style.display = "block";
+        btn.disabled = false;
+      }
+    }
+  });
+}
+
+function mostrarOverlay() {
+  const overlay = crearOverlaySiHaceFalta();
+  overlay.hidden = false;
+  overlay.offsetHeight; // forzar reflow para que la transición corra
+  overlay.classList.add("auth-visible");
+}
 function ocultarOverlay() {
   const overlay = document.getElementById("pantalla-login");
-  if (overlay) overlay.hidden = true;
+  if (!overlay) return;
+  overlay.classList.remove("auth-visible");
+  setTimeout(() => { overlay.hidden = true; }, 200);
 }
 
 // Se resuelve una sola vez, la primera vez que hay un usuario logueado Y
@@ -275,5 +355,8 @@ function usuarioActual() {
 window.esperarAutenticacion = esperarAutenticacion;
 window.cerrarSesion = cerrarSesion;
 window.usuarioActual = usuarioActual;
+window.iniciales = iniciales;
+window.actualizarUICuenta = actualizarUICuenta;
+window.abrirEditarPerfil = abrirEditarPerfil;
 
 })();

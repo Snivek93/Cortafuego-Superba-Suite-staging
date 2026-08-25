@@ -68,6 +68,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!overlay) return;
     temaAplicar(temaActual);          // resalta el botón activo
     calcVisAplicar(calcVisLeer());    // resalta el botón activo
+    if (window.actualizarUICuenta) window.actualizarUICuenta();
     const spanVersion = document.getElementById("cfg-acerca-version");
     if (spanVersion && window.APP_VERSION) spanVersion.textContent = window.APP_VERSION;
     const spanAnio = document.getElementById("cfg-acerca-anio");
@@ -86,6 +87,15 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   if (btnAbrir) btnAbrir.addEventListener("click", abrirConfig);
+  window.abrirConfig = abrirConfig;
+  const btnEditarPerfil = document.getElementById("cfg-btn-editar-perfil");
+  if (btnEditarPerfil) btnEditarPerfil.addEventListener("click", () => { if (window.abrirEditarPerfil) window.abrirEditarPerfil(); });
+  const btnCerrarSesionCfg = document.getElementById("cfg-btn-cerrar-sesion");
+  if (btnCerrarSesionCfg) btnCerrarSesionCfg.addEventListener("click", () => {
+    const hacer = () => { if (window.cerrarSesion) window.cerrarSesion(); };
+    if (window.pedirConfirmacion) pedirConfirmacion("¿Cerrar sesión?", hacer);
+    else if (confirm("¿Cerrar sesión?")) hacer();
+  });
   if (btnCerrar) btnCerrar.addEventListener("click", cerrarConfig);
   if (overlay) overlay.addEventListener("click", e => { if (e.target === overlay) cerrarConfig(); });
   if (btnToggleBd && cfgBdContenido) btnToggleBd.addEventListener("click", () => {
@@ -119,5 +129,6 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // --- Exports usados por otros módulos ---
+window.temaLeerPreferencia = temaLeerPreferencia;
 
 })();

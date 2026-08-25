@@ -582,8 +582,6 @@ async function initApp() {
     el.addEventListener("input", () => { PROJECT_INFO[key] = el.value; marcarCambio(); });
   });
 
-  document.getElementById("btn-compartir").addEventListener("click", compartirReporte);
-
   function posicionarDropdown(btn, panel) {
     const r = btn.getBoundingClientRect();
     panel.style.left = "0px";

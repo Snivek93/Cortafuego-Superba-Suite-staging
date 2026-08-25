@@ -1281,7 +1281,11 @@ async function exportarPlanosPDF() {
     }
     await dibujarPlanoEnPaginaPdf(doc, plano);
   }
-  doc.save("planos.pdf");
+  const nombre = (PROJECT_INFO.nombre || "proyecto").replace(/[^a-z0-9\-_ ]/gi, "").trim().replace(/\s+/g, "-") || "proyecto";
+  await window.compartirODescargarPDF(doc, `${nombre}-planos.pdf`, {
+    titulo: `Planos — ${PROJECT_INFO.nombre || "proyecto"}`,
+    texto: `Planos de sello cortafuego para ${PROJECT_INFO.nombre || "el proyecto"}.`,
+  });
 }
 
 // Dibuja un plano (título + imagen con marcas) en la página actual de un

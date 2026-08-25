@@ -327,6 +327,33 @@ function construirReportePDF(opciones) {
   return doc;
 }
 
+// Comparte el PDF con el compartir nativo del celular (WhatsApp, correo, etc.)
+// si el navegador lo soporta; si no, lo descarga — mismo comportamiento que
+// antes tenía el botón "Compartir" del header, pero ahora vive en cada ítem
+// del menú PDF, compartiendo/descargando exactamente el PDF que se tocó.
+// `fuente` puede ser un doc de jsPDF (tiene .output) o ya un Blob (pdf-lib).
+async function compartirODescargarPDF(fuente, filename, opts) {
+  const blob = (fuente instanceof Blob) ? fuente : fuente.output("blob");
+  const titulo = (opts && opts.titulo) || filename;
+  const texto = (opts && opts.texto) || "";
+  try {
+    const file = new File([blob], filename, { type: "application/pdf" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: titulo, text: texto });
+      mostrarToast("PDF compartido.");
+      return;
+    }
+  } catch (err) {
+    if (err && err.name === "AbortError") return;
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  mostrarToast("PDF descargado.");
+}
+
 function descargarPDF(modo) {
   try {
     const opts = modo === "levantamiento" ? { levantamiento: true, resumen: false }
@@ -338,8 +365,13 @@ function descargarPDF(modo) {
     const sufijo = modo === "levantamiento" ? "-levantamiento-detallado"
       : modo === "levantamiento-resumido" ? "-levantamiento-resumido"
       : modo === "resumen" ? "-resumen" : "-reporte-completo";
-    doc.save(`${nombre}${sufijo}.pdf`);
-    mostrarToast("PDF descargado.");
+    const etiqueta = modo === "levantamiento" ? "Levantamiento detallado"
+      : modo === "levantamiento-resumido" ? "Levantamiento resumido"
+      : modo === "resumen" ? "Resumen" : "Informe completo";
+    compartirODescargarPDF(doc, `${nombre}${sufijo}.pdf`, {
+      titulo: `${etiqueta} — ${PROJECT_INFO.nombre || "proyecto"}`,
+      texto: `${etiqueta} de sello cortafuego para ${PROJECT_INFO.nombre || "el proyecto"}.`,
+    });
   } catch (err) {
     mostrarToast("No se pudo generar el PDF: " + err.message, "error");
   }
@@ -352,4 +384,5 @@ window.dibujarLetterheadPDF = dibujarLetterheadPDF;
 window.dibujarNumeroPaginaPDF = dibujarNumeroPaginaPDF;
 window.construirReportePDF = construirReportePDF;
 window.descargarPDF = descargarPDF;
+window.compartirODescargarPDF = compartirODescargarPDF;
 })();

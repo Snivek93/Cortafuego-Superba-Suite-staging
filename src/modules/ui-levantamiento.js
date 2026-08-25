@@ -1894,37 +1894,6 @@ function renderLevantamientoTabJuntas() {
   });
 }
 
-async function compartirReporte() {
-  const nombre = (PROJECT_INFO.nombre || "proyecto").replace(/[^a-z0-9\-_ ]/gi, "").trim().replace(/\s+/g, "-") || "proyecto";
-  let doc;
-  try {
-    doc = construirReportePDF();
-  } catch (err) {
-    mostrarToast("No se pudo generar el reporte: " + err.message, "error");
-    return;
-  }
-
-  const archivo = `${nombre}-reporte-cortafuego.pdf`;
-  const titulo = `Reporte cortafuego — ${PROJECT_INFO.nombre || "proyecto"}`;
-  const texto = `Reporte de sello cortafuego para ${PROJECT_INFO.nombre || "el proyecto"}${PROJECT_INFO.cliente ? " (" + PROJECT_INFO.cliente + ")" : ""}.`;
-
-  try {
-    const blob = doc.output("blob");
-    const file = new File([blob], archivo, { type: "application/pdf" });
-
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file], title: titulo, text: texto });
-      mostrarToast("Reporte compartido.");
-      return;
-    }
-  } catch (err) {
-    if (err && err.name === "AbortError") return;
-  }
-
-  doc.save(archivo);
-  mostrarToast("Este navegador no permite compartir el PDF directo — se descargó para que lo adjuntes en WhatsApp, correo, etc.");
-}
-
 function switchTab(tab) {
   ACTIVE_TAB = tab;
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
@@ -1953,7 +1922,6 @@ window.juntaLabelCorta = juntaLabelCorta;
 window.lanaUnidadesSinRedondear = lanaUnidadesSinRedondear;
 window.agruparJuntasPorCaracteristicas = agruparJuntasPorCaracteristicas;
 window.renderLevantamientoTabJuntas = renderLevantamientoTabJuntas;
-window.compartirReporte = compartirReporte;
 window.switchTab = switchTab;
 window.iconoJuntaTipo = iconoJuntaTipo;
 window.iconoJuntaPosicion = iconoJuntaPosicion;

@@ -544,12 +544,11 @@ async function descargarSubmittalInterno() {
 
   const finalBytes = await master.save();
   const blob = new Blob([finalBytes], { type: "application/pdf" });
-  const url = URL.createObjectURL(blob);
   const nombre = (PROJECT_INFO.nombre || "proyecto").replace(/[^a-z0-9\-_ ]/gi, "").trim().replace(/\s+/g, "-") || "proyecto";
-  const a = document.createElement("a");
-  a.href = url; a.download = `${nombre}-submittal.pdf`;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  await window.compartirODescargarPDF(blob, `${nombre}-submittal.pdf`, {
+    titulo: `Submittal — ${PROJECT_INFO.nombre || "proyecto"}`,
+    texto: `Submittal de sello cortafuego para ${PROJECT_INFO.nombre || "el proyecto"}.`,
+  });
 
   mostrarToast(
     fallidos === 0

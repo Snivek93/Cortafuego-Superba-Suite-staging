@@ -2401,8 +2401,10 @@ function descargarMemoriaCalculoPDF() {
     const doc = construirMemoriaCalculoPDF();
     if (!doc) { mostrarToast("No hay penetrantes ni juntas con datos completos para generar la memoria de cálculo.", "error"); return; }
     const nombre = (PROJECT_INFO.nombre || "proyecto").replace(/[^a-z0-9\-_ ]/gi, "").trim().replace(/\s+/g, "-") || "proyecto";
-    doc.save(`${nombre}-memoria-calculo.pdf`);
-    mostrarToast("Memoria de cálculo descargada.");
+    window.compartirODescargarPDF(doc, `${nombre}-memoria-calculo.pdf`, {
+      titulo: `Memoria de Cálculo — ${PROJECT_INFO.nombre || "proyecto"}`,
+      texto: `Memoria de cálculo de sello cortafuego para ${PROJECT_INFO.nombre || "el proyecto"}.`,
+    });
   } catch (err) {
     mostrarToast("No se pudo generar la memoria de cálculo: " + err.message, "error");
   }
