@@ -650,6 +650,7 @@ body.tf-open .lev-form-sticky, body.tf-open #levantamiento-fullscreen { padding-
 }
 .acr-acompanante-botones { display: flex; gap: 8px; flex-wrap: wrap; }
 .acr-planos-lista { display: flex; flex-direction: column; gap: 10px; }
+.acr-btn-agregar-plano { margin-top: 10px; }
 .acr-plano-item { display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
 .acr-plano-thumb { width: 56px; height: 40px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border); flex-shrink: 0; }
 .acr-plano-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -856,6 +857,21 @@ button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
 .proy-lista { display: flex; flex-direction: column; gap: 10px; max-width: 560px; }
 
 .proy-card { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid var(--border); background: var(--surface-raised); border-radius: 14px; padding: 14px 16px; cursor: pointer; transition: border-color .15s ease; max-width: 560px; }
+.proy-breadcrumb { display: flex; align-items: center; gap: 6px; background: transparent; border: none; color: var(--text-secondary); font-size: var(--fs-sm); font-weight: 600; cursor: pointer; padding: 0 0 12px; }
+.proy-breadcrumb .icon { width: 16px; height: 16px; }
+.proy-orden-control { display: inline-flex; background: var(--grey-1); border-radius: 8px; padding: 3px; gap: 3px; margin-bottom: 12px; }
+.proy-orden-btn { border: none; background: transparent; color: var(--text-secondary); font-size: var(--fs-xs); font-weight: 600; padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+.proy-orden-btn.active { background: var(--surface-raised); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.proy-card-carpeta { background: var(--err-bg); border-color: #f0c4c4; }
+.proy-card-carpeta-icono { color: var(--hilti-red); width: 20px; height: 20px; margin-right: 4px; }
+.proy-carpeta-contador { font-size: var(--fs-xs); color: var(--text-muted); flex-shrink: 0; }
+.proy-btn-nueva-carpeta { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; max-width: 560px; margin-top: 10px; background: transparent; border: 1px dashed var(--border); border-radius: 12px; padding: 10px; font-size: var(--fs-sm); color: var(--text-secondary); cursor: pointer; }
+.proy-card-grip { color: var(--text-muted); width: 18px; height: 18px; flex-shrink: 0; cursor: grab; touch-action: none; }
+.proy-card-mover { flex-shrink: 0; background: transparent; border: none; color: var(--text-muted); padding: 6px; border-radius: var(--radius-sm); cursor: pointer; display: flex; }
+@media (hover: hover) and (pointer: fine) { .proy-card-mover:hover { color: var(--ink); background: var(--grey-1); } }
+.proy-card-arrastrando { opacity: 0.5; }
+.proy-drop-antes { border-top: 3px solid var(--hilti-red); }
+.proy-drop-despues { border-bottom: 3px solid var(--hilti-red); }
 @media (hover: hover) and (pointer: fine) { .proy-card:hover { border-color: var(--hilti-red); } }
 .proy-card-borrador { border-style: dashed; }
 .proy-card-info { min-width: 0; }
