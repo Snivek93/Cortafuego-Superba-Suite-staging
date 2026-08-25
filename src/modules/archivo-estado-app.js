@@ -827,12 +827,11 @@ async function initApp() {
   } else {
     if (window.esperarAutenticacion) await window.esperarAutenticacion();
     await migrarProyectoUnicoSiHaceFalta();
-    let activoId = null;
-    try { activoId = await idbLeerActivo(); } catch (e) { activoId = null; }
-    const restaurado = activoId ? await abrirProyectoExistente(activoId) : false;
-    if (restaurado) {
-      mostrarToast(`Se restauró tu último proyecto: ${ROWS.length} fila(s).`);
-    } else if (window.mostrarPantallaProyectos) {
+    // Cada arranque de la app muestra la Pantalla de Proyectos primero,
+    // aunque haya un proyecto activo de la sesión anterior — decisión de
+    // Kevin por consistencia, aunque sea un toque más lento que entrar
+    // directo al último proyecto.
+    if (window.mostrarPantallaProyectos) {
       await window.mostrarPantallaProyectos();
     } else {
       // Red de seguridad si proyectos.js no llegó a cargar por algún motivo.

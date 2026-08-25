@@ -82,6 +82,8 @@ async function renderPantallaProyectos(permitirCerrar) {
     ? `<p class="proy-vacio">Todavía no tenés proyectos. Creá el primero.</p>`
     : "";
 
+  const usuario = window.usuarioActual ? window.usuarioActual() : null;
+
   overlay.innerHTML = `
     <div class="proy-panel">
       <div class="proy-header">
@@ -91,6 +93,11 @@ async function renderPantallaProyectos(permitirCerrar) {
         </div>
         ${permitirCerrar ? `<button type="button" class="secondary proy-btn-cerrar" id="proy-btn-cerrar" title="Cerrar" aria-label="Cerrar"><svg class="icon"><use href="#i-close"/></svg></button>` : ""}
       </div>
+      ${usuario ? `
+      <div class="proy-cuenta">
+        <span class="proy-cuenta-email" title="${escapeHtml(usuario.email || "")}">${escapeHtml(usuario.email || "")}</span>
+        <button type="button" class="proy-btn-logout" id="proy-btn-logout">Cerrar sesión</button>
+      </div>` : ""}
       <div class="proy-body">
         ${seccionProyectos}
         ${seccionBorradores}
@@ -142,6 +149,13 @@ async function renderPantallaProyectos(permitirCerrar) {
 
   const btnCerrar = document.getElementById("proy-btn-cerrar");
   if (btnCerrar) btnCerrar.addEventListener("click", ocultarPantallaProyectos);
+
+  const btnLogout = document.getElementById("proy-btn-logout");
+  if (btnLogout) btnLogout.addEventListener("click", () => {
+    const hacer = () => { if (window.cerrarSesion) cerrarSesion(); };
+    if (window.pedirConfirmacion) pedirConfirmacion("¿Cerrar sesión?", hacer);
+    else if (confirm("¿Cerrar sesión?")) hacer();
+  });
 
   document.getElementById("proy-btn-nuevo").addEventListener("click", async () => {
     await window.crearYAbrirProyectoNuevo();

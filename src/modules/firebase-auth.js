@@ -57,25 +57,26 @@ function renderLogin(modo, error) {
   overlay.innerHTML = `
     <div class="auth-panel">
       <div class="auth-brand">
-        <div class="auth-brand-mark"><svg class="icon"><use href="#i-flame"/></svg></div>
+        <img class="auth-brand-logo" src="icons/icon-192.png" alt="Firestop Suite — Superba" width="56" height="56" />
         <p class="auth-brand-title">Firestop Suite</p>
         <p class="auth-brand-sub">SUPERBA · DISTRIBUIDOR HILTI</p>
       </div>
+      <div class="auth-tabs" role="tablist">
+        <button type="button" class="auth-tab${esRegistro ? "" : " active"}" id="auth-tab-login" role="tab" aria-selected="${esRegistro ? "false" : "true"}">Iniciar sesión</button>
+        <button type="button" class="auth-tab${esRegistro ? " active" : ""}" id="auth-tab-registro" role="tab" aria-selected="${esRegistro ? "true" : "false"}">Crear cuenta</button>
+      </div>
+      <p class="auth-mode-title">${esRegistro ? "Crear tu cuenta nueva" : "Ingresá con tu cuenta"}</p>
       <form id="auth-form" autocomplete="on">
         <input type="email" id="auth-email" name="email" placeholder="correo@superba.cr" autocomplete="username" required />
         <input type="password" id="auth-password" name="password" placeholder="Contraseña" autocomplete="${esRegistro ? "new-password" : "current-password"}" minlength="6" required />
+        ${esRegistro ? `<p class="auth-hint">Mínimo 6 caracteres.</p>` : ""}
         ${error ? `<p class="auth-error">${escapeHtml(error)}</p>` : ""}
         <button type="submit" class="primary auth-btn-submit" id="auth-btn-submit">${esRegistro ? "Crear cuenta" : "Iniciar sesión"}</button>
       </form>
-      <p class="auth-switch">
-        ${esRegistro ? "¿Ya tenés cuenta?" : "¿No tenés cuenta?"}
-        <button type="button" class="auth-btn-switch" id="auth-btn-switch">${esRegistro ? "Iniciar sesión" : "Creá una"}</button>
-      </p>
     </div>`;
 
-  document.getElementById("auth-btn-switch").addEventListener("click", () => {
-    renderLogin(esRegistro ? "login" : "registro", null);
-  });
+  document.getElementById("auth-tab-login").addEventListener("click", () => { if (esRegistro) renderLogin("login", null); });
+  document.getElementById("auth-tab-registro").addEventListener("click", () => { if (!esRegistro) renderLogin("registro", null); });
 
   document.getElementById("auth-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -146,8 +147,12 @@ function esperarAutenticacion() {
 function cerrarSesion() {
   firebase.auth().signOut().catch((e) => console.error("Error al cerrar sesión:", e));
 }
+function usuarioActual() {
+  return firebase.auth().currentUser;
+}
 
 window.esperarAutenticacion = esperarAutenticacion;
 window.cerrarSesion = cerrarSesion;
+window.usuarioActual = usuarioActual;
 
 })();
