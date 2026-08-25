@@ -175,6 +175,26 @@ function idbLeerActivo() {
   }));
 }
 
+// Helpers genéricos de metadatos (carpetas, orden manual, modo de orden).
+// Deliberadamente separados de los datos de cada proyecto: mover un
+// proyecto de carpeta o reordenarlo no toca su propio registro guardado.
+function idbGuardarMetaClave(clave, valor) {
+  return abrirIDB().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE_META, "readwrite");
+    tx.objectStore(IDB_STORE_META).put(valor, clave);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error("Error al guardar " + clave));
+  }));
+}
+function idbLeerMetaClave(clave) {
+  return abrirIDB().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE_META, "readonly");
+    const req = tx.objectStore(IDB_STORE_META).get(clave);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error || new Error("Error al leer " + clave));
+  }));
+}
+
 // Le pide al navegador que no expulse estos datos cuando ande apretado de
 // espacio. Es best-effort: si lo niega, no pasa nada malo. Hay que pedirlo en
 // cada arranque porque algunos navegadores lo resetean al cerrar.
@@ -736,6 +756,8 @@ window.idbGuardarProyecto = idbGuardarProyecto;
 window.idbBorrarProyecto = idbBorrarProyecto;
 window.idbLeerActivo = idbLeerActivo;
 window.idbGuardarActivo = idbGuardarActivo;
+window.idbGuardarMetaClave = idbGuardarMetaClave;
+window.idbLeerMetaClave = idbLeerMetaClave;
 window.abrirProyectoExistente = abrirProyectoExistente;
 window.crearYAbrirProyectoNuevo = crearYAbrirProyectoNuevo;
 })();

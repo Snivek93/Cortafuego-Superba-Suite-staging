@@ -1,13 +1,25 @@
 // ============================================================================
-// proyectos.js — Pantalla de Proyectos (pantalla completa, multi-proyecto)
+// proyectos.js — Pantalla de Proyectos (pantalla completa, multi-proyecto,
+// carpetas + orden manual/A-Z/reciente)
 // ============================================================================
 // Depende de funciones expuestas por archivo-estado-app.js:
 // idbListarProyectos, idbBorrarProyecto, abrirProyectoExistente,
-// crearYAbrirProyectoNuevo, PROYECTO_ACTIVO_ID — y de firebase-auth.js:
-// usuarioActual, iniciales, abrirEditarPerfil, cerrarSesion. El orden de
-// <script> no importa: todo se usa desde manejadores de eventos, después de
-// que los archivos ya terminaron de ejecutarse.
+// crearYAbrirProyectoNuevo, idbGuardarMetaClave, idbLeerMetaClave,
+// PROYECTO_ACTIVO_ID — y de firebase-auth.js: usuarioActual, iniciales,
+// abrirEditarPerfil, cerrarSesion. El orden de <script> no importa: todo se
+// usa desde manejadores de eventos, después de que los archivos ya
+// terminaron de ejecutarse.
+//
+// Organización: las carpetas y el orden son metadatos SEPARADOS del propio
+// registro de cada proyecto (viven en el store 'meta', no en 'proyectos')
+// — mover un proyecto de carpeta o reordenarlo nunca toca sus datos.
 (function () {
+
+let CARPETAS = [];                          // [{ id, nombre, creadoEn }]
+let CARPETA_ASIGNACIONES = {};               // { [proyectoId]: carpetaId }
+let ORDEN_MANUAL = { raiz: [], porCarpeta: {} }; // { raiz: [ids...], porCarpeta: { [carpetaId]: [ids...] } }
+let MODO_ORDEN = "manual";                   // "manual" | "az" | "reciente" — por defecto Manual
+let CARPETA_ACTIVA_ID = null;                // null = raíz
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -29,19 +41,56 @@ function formatearFechaRelativa(iso) {
   return "Actualizado " + fecha.toLocaleDateString("es-CR", { day: "numeric", month: "short" });
 }
 
-function crearOverlaySiHaceFalta() {
-  let el = document.getElementById("pantalla-proyectos");
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "pantalla-proyectos";
-    el.className = "pantalla-proyectos-overlay";
-    el.hidden = true;
-    document.body.appendChild(el);
+// ---------------------------------------------------------------------------
+// Carga / guardado de metadatos de organización
+// ---------------------------------------------------------------------------
+async function cargarEstadoOrganizacion() {
+  try { CARPETAS = (await window.idbLeerMetaClave("carpetas")) || []; } catch (e) { CARPETAS = []; }
+  try { CARPETA_ASIGNACIONES = (await window.idbLeerMetaClave("carpetaAsignaciones")) || {}; } catch (e) { CARPETA_ASIGNACIONES = {}; }
+  try { ORDEN_MANUAL = (await window.idbLeerMetaClave("ordenManual")) || { raiz: [], porCarpeta: {} }; } catch (e) { ORDEN_MANUAL = { raiz: [], porCarpeta: {} }; }
+  if (!ORDEN_MANUAL.porCarpeta) ORDEN_MANUAL.porCarpeta = {};
+  try {
+    const modoGuardado = await window.idbLeerMetaClave("modoOrden");
+    MODO_ORDEN = modoGuardado || "manual";
+  } catch (e) { MODO_ORDEN = "manual"; }
+}
+function guardarCarpetas() { window.idbGuardarMetaClave && window.idbGuardarMetaClave("carpetas", CARPETAS).catch(() => {}); }
+function guardarAsignaciones() { window.idbGuardarMetaClave && window.idbGuardarMetaClave("carpetaAsignaciones", CARPETA_ASIGNACIONES).catch(() => {}); }
+function guardarOrdenManual() { window.idbGuardarMetaClave && window.idbGuardarMetaClave("ordenManual", ORDEN_MANUAL).catch(() => {}); }
+function guardarModoOrden() { window.idbGuardarMetaClave && window.idbGuardarMetaClave("modoOrden", MODO_ORDEN).catch(() => {}); }
+
+// ---------------------------------------------------------------------------
+// Orden
+// ---------------------------------------------------------------------------
+function ordenarProyectos(lista, modo, carpetaId) {
+  const copia = lista.slice();
+  if (modo === "az") {
+    copia.sort((a, b) => (a.data.projectInfo.nombre || "").localeCompare(b.data.projectInfo.nombre || "", "es"));
+  } else if (modo === "reciente") {
+    copia.sort((a, b) => new Date(b.data.guardadoEn || 0) - new Date(a.data.guardadoEn || 0));
+  } else {
+    const claveOrden = carpetaId ? (ORDEN_MANUAL.porCarpeta[carpetaId] || []) : (ORDEN_MANUAL.raiz || []);
+    const posicion = new Map(claveOrden.map((id, i) => [id, i]));
+    copia.sort((a, b) => {
+      const pa = posicion.has(a.id) ? posicion.get(a.id) : Infinity;
+      const pb = posicion.has(b.id) ? posicion.get(b.id) : Infinity;
+      if (pa !== pb) return pa - pb;
+      return new Date(b.data.guardadoEn || 0) - new Date(a.data.guardadoEn || 0);
+    });
   }
-  return el;
+  return copia;
+}
+function ordenarCarpetas(lista, modo) {
+  const copia = lista.slice();
+  if (modo === "reciente") copia.sort((a, b) => new Date(b.creadoEn || 0) - new Date(a.creadoEn || 0));
+  else copia.sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es"));
+  return copia;
 }
 
-function tarjetaHTML(id, data, esBorrador) {
+// ---------------------------------------------------------------------------
+// HTML de tarjetas
+// ---------------------------------------------------------------------------
+function tarjetaProyectoHTML(id, data, esBorrador, modoManual) {
   const nombre = esBorrador
     ? (formatearFechaCorta(data.creadoEn || data.guardadoEn) || "Borrador")
     : ((data.projectInfo && data.projectInfo.nombre) || "Sin nombre");
@@ -52,13 +101,17 @@ function tarjetaHTML(id, data, esBorrador) {
     const cliente = data.projectInfo && data.projectInfo.cliente ? data.projectInfo.cliente : "";
     sub = [cliente, formatearFechaRelativa(data.guardadoEn)].filter(Boolean).join(" · ");
   }
+  const arrastrable = modoManual && !esBorrador;
   return `
-    <div class="proy-card${esBorrador ? " proy-card-borrador" : ""}" data-id="${escapeHtml(id)}">
+    <div class="proy-card${esBorrador ? " proy-card-borrador" : ""}" data-id="${escapeHtml(id)}" data-tipo="proyecto"
+      ${arrastrable ? `draggable="true" data-drag-item="1"` : ""}>
+      ${arrastrable ? `<svg class="icon proy-card-grip"><use href="#i-move"/></svg>` : ""}
       <div class="proy-card-info">
         <p class="proy-card-nombre">${escapeHtml(nombre)}</p>
         <p class="proy-card-sub">${escapeHtml(sub)}</p>
       </div>
       <div class="proy-card-right">
+        ${!esBorrador ? `<button type="button" class="proy-card-mover" data-id="${escapeHtml(id)}" title="Mover a carpeta" aria-label="Mover a carpeta"><svg class="icon"><use href="#i-folder"/></svg></button>` : ""}
         <button type="button" class="proy-card-borrar" data-id="${escapeHtml(id)}" title="Borrar proyecto" aria-label="Borrar proyecto">
           <svg class="icon"><use href="#i-trash"/></svg>
         </button>
@@ -66,7 +119,26 @@ function tarjetaHTML(id, data, esBorrador) {
       </div>
     </div>`;
 }
+function tarjetaCarpetaHTML(carpeta, cantidad) {
+  return `
+    <div class="proy-card proy-card-carpeta" data-id="${escapeHtml(carpeta.id)}" data-tipo="carpeta">
+      <svg class="icon proy-card-carpeta-icono"><use href="#i-folder"/></svg>
+      <div class="proy-card-info">
+        <p class="proy-card-nombre">${escapeHtml(carpeta.nombre)}</p>
+      </div>
+      <div class="proy-card-right">
+        <span class="proy-carpeta-contador">${cantidad}</span>
+        <button type="button" class="proy-card-borrar" data-id="${escapeHtml(carpeta.id)}" data-tipo="carpeta" title="Borrar carpeta" aria-label="Borrar carpeta">
+          <svg class="icon"><use href="#i-trash"/></svg>
+        </button>
+        <svg class="icon proy-card-chevron"><use href="#i-chevron-right"/></svg>
+      </div>
+    </div>`;
+}
 
+// ---------------------------------------------------------------------------
+// Popup de cuenta (sin cambios de sesiones anteriores)
+// ---------------------------------------------------------------------------
 function popupCuentaContenidoHTML() {
   const user = window.usuarioActual ? window.usuarioActual() : null;
   if (!user) return "";
@@ -109,7 +181,6 @@ function popupCuentaHTML() {
   if (!(window.usuarioActual && window.usuarioActual())) return "";
   return `<div class="proy-account-popup" id="proy-account-popup" hidden>${popupCuentaContenidoHTML()}</div>`;
 }
-
 function conectarBotonesPopup(popup) {
   const btnEditarPerfil = document.getElementById("proy-btn-editar-perfil");
   if (btnEditarPerfil) btnEditarPerfil.addEventListener("click", () => { popup.hidden = true; if (window.abrirEditarPerfil) window.abrirEditarPerfil(); });
@@ -144,27 +215,253 @@ function conectarBotonesPopup(popup) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Modal chico: nombre de carpeta nueva / mover a carpeta
+// ---------------------------------------------------------------------------
+function abrirModalNuevaCarpeta(padreId) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <p style="font-weight:600;margin:0 0 12px;">Nueva carpeta</p>
+      <input type="text" id="proy-nueva-carpeta-nombre" placeholder="Nombre de la carpeta" style="width:100%;box-sizing:border-box;height:40px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--fs-base);margin-bottom:4px;" />
+      <div class="modal-actions">
+        <button class="secondary" data-act="cancel">Cancelar</button>
+        <button class="primary" data-act="crear">Crear</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const input = document.getElementById("proy-nueva-carpeta-nombre");
+  input.focus();
+  const crear = async () => {
+    const nombre = input.value.trim();
+    if (!nombre) return;
+    const id = "c_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
+    CARPETAS.push({ id, nombre, creadoEn: new Date().toISOString(), padreId: padreId || null });
+    guardarCarpetas();
+    overlay.remove();
+    renderPantallaProyectos(!!window.PROYECTO_ACTIVO_ID);
+  };
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") crear(); });
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.dataset.act === "cancel") { overlay.remove(); return; }
+    if (e.target.dataset.act === "crear") crear();
+  });
+}
+function abrirModalMoverACarpeta(proyectoId) {
+  const opciones = [{ label: "Sin carpeta", act: "sin-carpeta", clase: "secondary" }];
+  CARPETAS.filter(c => !c.padreId).forEach(padre => {
+    opciones.push({ label: padre.nombre, act: "carpeta:" + padre.id, clase: "secondary" });
+    CARPETAS.filter(c => c.padreId === padre.id).forEach(hijo => {
+      opciones.push({ label: "\u00A0\u00A0↳ " + hijo.nombre, act: "carpeta:" + hijo.id, clase: "secondary" });
+    });
+  });
+  opciones.push({ label: "Cancelar", act: "cancelar", clase: "secondary" });
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  const botones = opciones.map(o => `<button class="${o.clase}" data-act="${o.act}">${escapeHtml(o.label)}</button>`).join("");
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <p style="font-weight:600;margin:0 0 12px;">Mover a carpeta</p>
+      <div class="modal-actions" style="flex-direction:column;align-items:stretch;">${botones}</div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) { overlay.remove(); return; }
+    const act = e.target.dataset.act;
+    if (!act) return;
+    overlay.remove();
+    if (act === "cancelar") return;
+    if (act === "sin-carpeta") delete CARPETA_ASIGNACIONES[proyectoId];
+    else if (act.startsWith("carpeta:")) CARPETA_ASIGNACIONES[proyectoId] = act.slice(8);
+    guardarAsignaciones();
+    renderPantallaProyectos(!!window.PROYECTO_ACTIVO_ID);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Arrastrar para reordenar (mouse: dragstart/dragover/drop; táctil: pointer
+// con long-press 350ms) — mismo patrón que ya usa Informes de Acreditación
+// para reordenar fotos, adaptado a lista vertical (eje Y en vez de X).
+// ---------------------------------------------------------------------------
+function ligarDragReordenarProyectos(lista, carpetaId) {
+  if (!lista || lista.dataset.proyDragBind) return;
+  lista.dataset.proyDragBind = "1";
+  let idArrastrado = null;
+
+  function guardarNuevoOrden() {
+    const ids = Array.from(lista.querySelectorAll('.proy-card[data-tipo="proyecto"]')).map(el => el.getAttribute("data-id"));
+    if (carpetaId) ORDEN_MANUAL.porCarpeta[carpetaId] = ids;
+    else ORDEN_MANUAL.raiz = ids;
+    guardarOrdenManual();
+  }
+  function limpiarIndicadores() {
+    lista.querySelectorAll(".proy-drop-antes, .proy-drop-despues").forEach((el) => el.classList.remove("proy-drop-antes", "proy-drop-despues"));
+  }
+  function moverEnDOM(idMovido, idDestino, antes) {
+    const origen = lista.querySelector(`.proy-card[data-id="${idMovido}"]`);
+    const destino = lista.querySelector(`.proy-card[data-id="${idDestino}"]`);
+    if (!origen || !destino || origen === destino) return;
+    if (antes) destino.before(origen); else destino.after(origen);
+    guardarNuevoOrden();
+  }
+
+  lista.addEventListener("dragstart", (evt) => {
+    const item = evt.target.closest("[data-drag-item]");
+    if (!item) return;
+    idArrastrado = item.getAttribute("data-id");
+    item.classList.add("proy-card-arrastrando");
+    evt.dataTransfer.effectAllowed = "move";
+    try { evt.dataTransfer.setData("text/plain", idArrastrado); } catch (e) {}
+  });
+  lista.addEventListener("dragend", (evt) => {
+    const item = evt.target.closest("[data-drag-item]");
+    if (item) item.classList.remove("proy-card-arrastrando");
+    limpiarIndicadores();
+    idArrastrado = null;
+  });
+  lista.addEventListener("dragover", (evt) => {
+    const item = evt.target.closest('.proy-card[data-tipo="proyecto"]');
+    if (!item || idArrastrado == null) return;
+    evt.preventDefault();
+    const rect = item.getBoundingClientRect();
+    const antes = evt.clientY < rect.top + rect.height / 2;
+    limpiarIndicadores();
+    item.classList.add(antes ? "proy-drop-antes" : "proy-drop-despues");
+  });
+  lista.addEventListener("drop", (evt) => {
+    const item = evt.target.closest('.proy-card[data-tipo="proyecto"]');
+    if (!item || idArrastrado == null) return;
+    evt.preventDefault();
+    const rect = item.getBoundingClientRect();
+    const antes = evt.clientY < rect.top + rect.height / 2;
+    const idDestino = item.getAttribute("data-id");
+    moverEnDOM(idArrastrado, idDestino, antes);
+    limpiarIndicadores();
+  });
+
+  // Fallback táctil: mantener presionado el asa (350ms) y arrastrar el dedo.
+  let touchId = null, touchTimer = null;
+  lista.addEventListener("pointerdown", (evt) => {
+    if (evt.pointerType !== "touch") return;
+    const item = evt.target.closest("[data-drag-item]");
+    if (!item || !evt.target.closest(".proy-card-grip")) return;
+    touchTimer = setTimeout(() => {
+      touchId = item.getAttribute("data-id");
+      item.classList.add("proy-card-arrastrando");
+      if (navigator.vibrate) navigator.vibrate(15);
+    }, 350);
+  });
+  lista.addEventListener("pointermove", (evt) => {
+    if (evt.pointerType !== "touch" || touchId == null) return;
+    evt.preventDefault();
+    const el = document.elementFromPoint(evt.clientX, evt.clientY);
+    const item = el && el.closest('.proy-card[data-tipo="proyecto"]');
+    limpiarIndicadores();
+    if (item && item.getAttribute("data-id") !== touchId) {
+      const rect = item.getBoundingClientRect();
+      const antes = evt.clientY < rect.top + rect.height / 2;
+      item.classList.add(antes ? "proy-drop-antes" : "proy-drop-despues");
+    }
+  }, { passive: false });
+  lista.addEventListener("pointerup", (evt) => {
+    clearTimeout(touchTimer);
+    if (evt.pointerType !== "touch" || touchId == null) { touchId = null; return; }
+    const el = document.elementFromPoint(evt.clientX, evt.clientY);
+    const item = el && el.closest('.proy-card[data-tipo="proyecto"]');
+    lista.querySelectorAll(".proy-card-arrastrando").forEach((n) => n.classList.remove("proy-card-arrastrando"));
+    limpiarIndicadores();
+    if (item) {
+      const idDestino = item.getAttribute("data-id");
+      if (idDestino !== touchId) {
+        const rect = item.getBoundingClientRect();
+        const antes = evt.clientY < rect.top + rect.height / 2;
+        moverEnDOM(touchId, idDestino, antes);
+      }
+    }
+    touchId = null;
+  });
+  lista.addEventListener("pointercancel", () => {
+    clearTimeout(touchTimer);
+    touchId = null;
+    lista.querySelectorAll(".proy-card-arrastrando").forEach((n) => n.classList.remove("proy-card-arrastrando"));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Render principal
+// ---------------------------------------------------------------------------
+function crearOverlaySiHaceFalta() {
+  let el = document.getElementById("pantalla-proyectos");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "pantalla-proyectos";
+    el.className = "pantalla-proyectos-overlay";
+    el.hidden = true;
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
 async function renderPantallaProyectos(permitirCerrar) {
   const overlay = crearOverlaySiHaceFalta();
+  await cargarEstadoOrganizacion();
+
   let lista = [];
   try { lista = await window.idbListarProyectos(); } catch (e) { lista = []; }
 
-  const proyectos = [];
+  const conNombre = [];
   const borradores = [];
   lista.forEach(({ id, data }) => {
     const tieneNombre = data && data.projectInfo && data.projectInfo.nombre && data.projectInfo.nombre.trim();
-    (tieneNombre ? proyectos : borradores).push({ id, data });
+    (tieneNombre ? conNombre : borradores).push({ id, data });
   });
-  proyectos.sort((a, b) => new Date(b.data.guardadoEn || 0) - new Date(a.data.guardadoEn || 0));
+
+  // Si la carpeta activa ya no existe (borrada en otra sesión/dispositivo), volver a raíz.
+  if (CARPETA_ACTIVA_ID && !CARPETAS.find(c => c.id === CARPETA_ACTIVA_ID)) CARPETA_ACTIVA_ID = null;
+  const carpetaActiva = CARPETA_ACTIVA_ID ? CARPETAS.find(c => c.id === CARPETA_ACTIVA_ID) : null;
+  const nivelActual = carpetaActiva ? (carpetaActiva.padreId ? 2 : 1) : 0; // 0 = raíz
+  const puedeCrearSubcarpeta = nivelActual < 2; // tope de 2 niveles: adentro de una subcarpeta ya no se puede crear otra
+
+  const proyectosVisibles = CARPETA_ACTIVA_ID
+    ? conNombre.filter(p => CARPETA_ASIGNACIONES[p.id] === CARPETA_ACTIVA_ID)
+    : conNombre.filter(p => !CARPETA_ASIGNACIONES[p.id]);
+  const proyectosOrdenados = ordenarProyectos(proyectosVisibles, MODO_ORDEN, CARPETA_ACTIVA_ID);
+  const modoManual = MODO_ORDEN === "manual";
+
+  // Subcarpetas del nivel actual: las que tienen como padre la carpeta activa
+  // (en la raíz, CARPETA_ACTIVA_ID es null, así que esto trae las de padreId null).
+  const carpetasVisibles = CARPETAS.filter(c => (c.padreId || null) === CARPETA_ACTIVA_ID);
+  const carpetasOrdenadas = ordenarCarpetas(carpetasVisibles, MODO_ORDEN);
   borradores.sort((a, b) => new Date(b.data.creadoEn || b.data.guardadoEn || 0) - new Date(a.data.creadoEn || a.data.guardadoEn || 0));
 
-  const seccionProyectos = proyectos.length
-    ? `<p class="proy-section-title">Tus proyectos</p><div class="proy-lista">${proyectos.map(p => tarjetaHTML(p.id, p.data, false)).join("")}</div>`
+  const breadcrumb = carpetaActiva
+    ? `<button type="button" class="proy-breadcrumb" id="proy-btn-volver-carpeta"><svg class="icon"><use href="#i-arrow-left"/></svg>${escapeHtml(carpetaActiva.nombre)}</button>`
     : "";
-  const seccionBorradores = borradores.length
-    ? `<p class="proy-section-title">Borradores</p><div class="proy-lista">${borradores.map(p => tarjetaHTML(p.id, p.data, true)).join("")}</div>`
+
+  const controlOrden = `
+    <div class="proy-orden-control">
+      <button type="button" class="proy-orden-btn${MODO_ORDEN === "az" ? " active" : ""}" data-orden="az">A-Z</button>
+      <button type="button" class="proy-orden-btn${MODO_ORDEN === "reciente" ? " active" : ""}" data-orden="reciente">Reciente</button>
+      <button type="button" class="proy-orden-btn${MODO_ORDEN === "manual" ? " active" : ""}" data-orden="manual">Manual</button>
+    </div>`;
+
+  const hayAlgoQueMostrar = carpetasOrdenadas.length || proyectosOrdenados.length;
+  const seccionProyectos = hayAlgoQueMostrar
+    ? `<p class="proy-section-title">${carpetaActiva ? escapeHtml(carpetaActiva.nombre) : "Tus proyectos"}</p>
+       ${controlOrden}
+       <div class="proy-lista" id="proy-lista-principal">
+         ${carpetasOrdenadas.map(c => tarjetaCarpetaHTML(c, conNombre.filter(p => CARPETA_ASIGNACIONES[p.id] === c.id).length)).join("")}
+         ${proyectosOrdenados.map(p => tarjetaProyectoHTML(p.id, p.data, false, modoManual)).join("")}
+       </div>`
     : "";
-  const vacio = (!proyectos.length && !borradores.length)
+  const btnNuevaCarpeta = puedeCrearSubcarpeta
+    ? `<button type="button" class="proy-btn-nueva-carpeta" id="proy-btn-nueva-carpeta"><svg class="icon"><use href="#i-plus"/></svg>Nueva carpeta</button>`
+    : "";
+  const seccionBorradores = (!CARPETA_ACTIVA_ID && borradores.length)
+    ? `<p class="proy-section-title">Borradores</p><div class="proy-lista">${borradores.map(p => tarjetaProyectoHTML(p.id, p.data, true, false)).join("")}</div>`
+    : "";
+  const vacio = (!hayAlgoQueMostrar && !borradores.length)
     ? `<div class="proy-vacio"><svg class="icon proy-vacio-icono"><use href="#i-folder"/></svg><p>Todavía no tenés proyectos.<br>Creá el primero con el botón de abajo.</p></div>`
     : "";
 
@@ -183,15 +480,18 @@ async function renderPantallaProyectos(permitirCerrar) {
       ${popupCuentaHTML()}
     </div>
     <div class="proy-body-full">
+      ${breadcrumb}
       ${seccionProyectos}
+      ${btnNuevaCarpeta}
       ${seccionBorradores}
       ${vacio}
     </div>
     <button type="button" class="proy-fab" id="proy-btn-nuevo" aria-label="Nuevo proyecto"><svg class="icon"><use href="#i-plus"/></svg></button>`;
 
-  overlay.querySelectorAll(".proy-card").forEach((card) => {
+  // --- Tarjetas: click para abrir (proyecto) o navegar (carpeta) ---
+  overlay.querySelectorAll('.proy-card[data-tipo="proyecto"]').forEach((card) => {
     card.addEventListener("click", async (e) => {
-      if (e.target.closest(".proy-card-borrar")) return;
+      if (e.target.closest(".proy-card-borrar") || e.target.closest(".proy-card-mover") || e.target.closest(".proy-card-grip")) return;
       const id = card.getAttribute("data-id");
       const ok = await window.abrirProyectoExistente(id);
       if (ok) {
@@ -202,13 +502,34 @@ async function renderPantallaProyectos(permitirCerrar) {
       }
     });
   });
+  overlay.querySelectorAll('.proy-card[data-tipo="carpeta"]').forEach((card) => {
+    card.addEventListener("click", (e) => {
+      if (e.target.closest(".proy-card-borrar")) return;
+      CARPETA_ACTIVA_ID = card.getAttribute("data-id");
+      renderPantallaProyectos(permitirCerrar);
+    });
+  });
 
+  // --- Borrar proyecto o carpeta ---
   overlay.querySelectorAll(".proy-card-borrar").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const id = btn.getAttribute("data-id");
+      const esCarpeta = btn.getAttribute("data-tipo") === "carpeta";
       const hacerBorrado = async () => {
+        if (esCarpeta) {
+          CARPETAS = CARPETAS
+            .filter(c => c.id !== id)
+            .map(c => c.padreId === id ? Object.assign({}, c, { padreId: null }) : c);
+          Object.keys(CARPETA_ASIGNACIONES).forEach(pid => { if (CARPETA_ASIGNACIONES[pid] === id) delete CARPETA_ASIGNACIONES[pid]; });
+          delete ORDEN_MANUAL.porCarpeta[id];
+          guardarCarpetas(); guardarAsignaciones(); guardarOrdenManual();
+          renderPantallaProyectos(permitirCerrar);
+          return;
+        }
         try { await window.idbBorrarProyecto(id); } catch (err) { console.error("No se pudo borrar el proyecto:", err); }
+        delete CARPETA_ASIGNACIONES[id];
+        guardarAsignaciones();
         if (id === window.PROYECTO_ACTIVO_ID) {
           window.PROYECTO_ACTIVO_ID = null;
           if (typeof ROWS !== "undefined") {
@@ -219,19 +540,53 @@ async function renderPantallaProyectos(permitirCerrar) {
           renderPantallaProyectos(permitirCerrar);
         }
       };
-      if (window.pedirConfirmacion) {
-        pedirConfirmacion("¿Borrar este proyecto? No se puede deshacer.", hacerBorrado);
-      } else if (confirm("¿Borrar este proyecto? No se puede deshacer.")) {
-        hacerBorrado();
-      }
+      const mensaje = esCarpeta ? "¿Borrar esta carpeta? Los proyectos y subcarpetas que tenga adentro NO se borran, vuelven a la lista general." : "¿Borrar este proyecto? No se puede deshacer.";
+      if (window.pedirConfirmacion) pedirConfirmacion(mensaje, hacerBorrado);
+      else if (confirm(mensaje)) hacerBorrado();
     });
   });
+
+  // --- Mover a carpeta ---
+  overlay.querySelectorAll(".proy-card-mover").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      abrirModalMoverACarpeta(btn.getAttribute("data-id"));
+    });
+  });
+
+  // --- Control de orden ---
+  overlay.querySelectorAll(".proy-orden-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      MODO_ORDEN = btn.getAttribute("data-orden");
+      guardarModoOrden();
+      renderPantallaProyectos(permitirCerrar);
+    });
+  });
+
+  // --- Nueva carpeta / breadcrumb ---
+  const btnNuevaCarpetaEl = document.getElementById("proy-btn-nueva-carpeta");
+  if (btnNuevaCarpetaEl) btnNuevaCarpetaEl.addEventListener("click", () => abrirModalNuevaCarpeta(CARPETA_ACTIVA_ID));
+  const btnVolverCarpeta = document.getElementById("proy-btn-volver-carpeta");
+  if (btnVolverCarpeta) btnVolverCarpeta.addEventListener("click", () => {
+    CARPETA_ACTIVA_ID = carpetaActiva ? (carpetaActiva.padreId || null) : null;
+    renderPantallaProyectos(permitirCerrar);
+  });
+
+  // --- Arrastrar para reordenar (solo en modo Manual) ---
+  if (modoManual) {
+    const listaPrincipal = document.getElementById("proy-lista-principal");
+    if (listaPrincipal) ligarDragReordenarProyectos(listaPrincipal, CARPETA_ACTIVA_ID);
+  }
 
   const btnCerrar = document.getElementById("proy-btn-cerrar");
   if (btnCerrar) btnCerrar.addEventListener("click", ocultarPantallaProyectos);
 
   document.getElementById("proy-btn-nuevo").addEventListener("click", async () => {
-    await window.crearYAbrirProyectoNuevo();
+    const nuevoId = await window.crearYAbrirProyectoNuevo();
+    if (CARPETA_ACTIVA_ID && nuevoId) {
+      CARPETA_ASIGNACIONES[nuevoId] = CARPETA_ACTIVA_ID;
+      guardarAsignaciones();
+    }
     ocultarPantallaProyectos();
   });
 
@@ -261,10 +616,7 @@ async function mostrarPantallaProyectos() {
   await renderPantallaProyectos(hayProyectoAbierto);
   const overlay = document.getElementById("pantalla-proyectos");
   overlay.hidden = false;
-  // Forzar reflow para que la transición de entrada corra (si se agrega la
-  // clase en el mismo frame que se quita [hidden], el navegador la agrupa
-  // con el estado inicial y no anima nada).
-  overlay.offsetHeight;
+  overlay.offsetHeight; // forzar reflow para que la transición de entrada corra
   overlay.classList.add("proy-visible");
 }
 
