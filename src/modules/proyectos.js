@@ -72,8 +72,9 @@ function popupCuentaContenidoHTML() {
   if (!user) return "";
   const ini = window.iniciales ? window.iniciales(user) : "?";
   const nombre = user.displayName || "Sin nombre";
-  const temaActual = window.temaLeerPreferencia ? window.temaLeerPreferencia() : "auto";
-  const temaLabel = { auto: "Automático", light: "Claro", dark: "Oscuro" }[temaActual] || "Automático";
+  const temaActualPref = window.temaLeerPreferencia ? window.temaLeerPreferencia() : "auto";
+  const temaLabel = { auto: "Automático", light: "Claro", dark: "Oscuro" }[temaActualPref] || "Automático";
+  const version = window.APP_VERSION || "1.0.0";
   return `
       <div class="proy-account-popup-head">
         <div class="proy-account-avatar">${escapeHtml(ini)}</div>
@@ -81,12 +82,28 @@ function popupCuentaContenidoHTML() {
           <p class="proy-account-name">${escapeHtml(nombre)}</p>
           <p class="proy-account-email">${escapeHtml(user.email || "")}</p>
         </div>
+        <button type="button" class="proy-account-edit-btn" id="proy-btn-editar-perfil" title="Editar perfil" aria-label="Editar perfil"><svg class="icon"><use href="#i-edit"/></svg></button>
       </div>
-      <button type="button" class="proy-account-item" id="proy-btn-editar-perfil"><svg class="icon"><use href="#i-edit"/></svg>Editar perfil</button>
-      <button type="button" class="proy-account-item" id="proy-btn-tema"><svg class="icon"><use href="#i-gear"/></svg>Tema<span class="proy-account-item-hint">${escapeHtml(temaLabel)} ›</span></button>
-      <button type="button" class="proy-account-item" id="proy-btn-acerca-de"><svg class="icon"><use href="#i-clipboard"/></svg>Acerca de</button>
+      <button type="button" class="dropdown-item dropdown-item-sub" id="proy-btn-tema-toggle">
+        <svg class="icon"><use href="#i-gear"/></svg>Tema<span class="proy-account-item-hint">${escapeHtml(temaLabel)}</span><svg class="icon icon-chevron-right"><use href="#i-chevron-right"/></svg>
+      </button>
+      <div class="dropdown-sub-panel" id="proy-tema-sub-panel">
+        <div class="proy-tema-opciones">
+          <button type="button" class="secondary btn-tema-opt" data-tema="auto">Auto</button>
+          <button type="button" class="secondary btn-tema-opt" data-tema="light">Claro</button>
+          <button type="button" class="secondary btn-tema-opt" data-tema="dark">Oscuro</button>
+        </div>
+      </div>
+      <button type="button" class="dropdown-item dropdown-item-sub" id="proy-btn-acerca-toggle">
+        <svg class="icon"><use href="#i-clipboard"/></svg>Acerca de<svg class="icon icon-chevron-right"><use href="#i-chevron-right"/></svg>
+      </button>
+      <div class="dropdown-sub-panel" id="proy-acerca-sub-panel">
+        <p class="proy-acerca-texto">Firestop Suite · Superba<br>Versión ${escapeHtml(version)}<br>Ing. Kevin Soto Navarro, IC-31624<br>San José, Costa Rica</p>
+      </div>
       <div class="dropdown-sep"></div>
-      <button type="button" class="proy-account-item proy-account-item-danger" id="proy-btn-logout"><svg class="icon"><use href="#i-close"/></svg>Cerrar sesión</button>`;
+      <div class="proy-account-logout-fila">
+        <button type="button" class="proy-account-logout-link" id="proy-btn-logout">Cerrar sesión</button>
+      </div>`;
 }
 function popupCuentaHTML() {
   if (!(window.usuarioActual && window.usuarioActual())) return "";
@@ -96,10 +113,28 @@ function popupCuentaHTML() {
 function conectarBotonesPopup(popup) {
   const btnEditarPerfil = document.getElementById("proy-btn-editar-perfil");
   if (btnEditarPerfil) btnEditarPerfil.addEventListener("click", () => { popup.hidden = true; if (window.abrirEditarPerfil) window.abrirEditarPerfil(); });
-  const btnTema = document.getElementById("proy-btn-tema");
-  if (btnTema) btnTema.addEventListener("click", () => { popup.hidden = true; if (window.abrirConfig) window.abrirConfig(); });
-  const btnAcercaDe = document.getElementById("proy-btn-acerca-de");
-  if (btnAcercaDe) btnAcercaDe.addEventListener("click", () => { popup.hidden = true; if (window.abrirConfig) window.abrirConfig(); });
+
+  const btnTemaToggle = document.getElementById("proy-btn-tema-toggle");
+  const temaSubPanel = document.getElementById("proy-tema-sub-panel");
+  if (btnTemaToggle && temaSubPanel) {
+    btnTemaToggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      temaSubPanel.classList.toggle("open");
+      btnTemaToggle.classList.toggle("open");
+    });
+  }
+  if (window.registrarBotonesTema) window.registrarBotonesTema(popup);
+
+  const btnAcercaToggle = document.getElementById("proy-btn-acerca-toggle");
+  const acercaSubPanel = document.getElementById("proy-acerca-sub-panel");
+  if (btnAcercaToggle && acercaSubPanel) {
+    btnAcercaToggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      acercaSubPanel.classList.toggle("open");
+      btnAcercaToggle.classList.toggle("open");
+    });
+  }
+
   const btnLogout = document.getElementById("proy-btn-logout");
   if (btnLogout) btnLogout.addEventListener("click", () => {
     popup.hidden = true;

@@ -44,6 +44,19 @@ function calcVisAplicar(val) {
   );
 }
 
+function registrarBotonesTema(root) {
+  (root || document).querySelectorAll(".btn-tema-opt").forEach(btn => {
+    if (btn.dataset.temaRegistrado) return; // evita duplicar el listener si se llama dos veces sobre el mismo botón
+    btn.dataset.temaRegistrado = "1";
+    btn.addEventListener("click", () => {
+      temaActual = btn.dataset.tema;
+      temaGuardarPreferencia(temaActual);
+      temaAplicar(temaActual);
+    });
+  });
+  temaAplicar(temaActual);
+}
+
 let temaActual = temaLeerPreferencia();
 temaAplicar(temaActual);
 
@@ -104,14 +117,8 @@ document.addEventListener("DOMContentLoaded", () => {
     btnToggleBd.setAttribute("aria-expanded", String(!abierta));
   });
 
-  // Botones de tema
-  document.querySelectorAll(".btn-tema-opt").forEach(btn => {
-    btn.addEventListener("click", () => {
-      temaActual = btn.dataset.tema;
-      temaGuardarPreferencia(temaActual);
-      temaAplicar(temaActual);
-    });
-  });
+  // Botones de tema (registra los que ya existen en el DOM al arrancar)
+  registrarBotonesTema(document);
 
   // Botones de visibilidad calculadora
   document.querySelectorAll(".btn-calc-vis").forEach(btn => {
@@ -130,5 +137,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // --- Exports usados por otros módulos ---
 window.temaLeerPreferencia = temaLeerPreferencia;
+window.registrarBotonesTema = registrarBotonesTema;
 
 })();
