@@ -5,11 +5,14 @@
  * y funcione aunque no haya internet.
  *
  * Estrategia por tipo de archivo:
- * - HTML / CSS / JS propios de la app (lo que cambia seguido): "red primero".
- *   Cada vez que hay internet, se pide la versión más nueva directo del
- *   servidor y se muestra esa. Si no hay internet, se usa la copia guardada.
- *   Con esto, NO hace falta acordarse de subir CACHE_VERSION cada vez que se
- *   edita un archivo — el celular siempre pide la versión actual solo.
+ * - HTML / CSS / JS propios de la app (lo que cambia seguido): "red primero,
+ *   con tope de tiempo". Cada vez que hay internet BUENA, se pide la versión
+ *   más nueva directo del servidor y se muestra esa. Si no hay internet, o si
+ *   la red tarda más de FETCH_TIMEOUT_MS (conexión mala/intermitente, no
+ *   necesariamente caída del todo), se usa la copia guardada de inmediato en
+ *   vez de quedarse esperando. Con esto, NO hace falta acordarse de subir
+ *   CACHE_VERSION cada vez que se edita un archivo — el celular siempre pide
+ *   la versión actual solo.
  * - Todo lo demás (vendor/, icons/ — cambia poco y pesa más): "caché primero"
  *   con actualización en segundo plano, para que abra rápido.
  *
@@ -19,6 +22,14 @@
  */
 const CACHE_VERSION = "v1.0.66";
 const CACHE_NAME = `cortafuego-hilti-${CACHE_VERSION}`;
+
+// Con señal mala pero presente (3G intermitente en obra), un fetch() sin
+// límite de tiempo puede quedar "colgado" sin fallar nunca — ni resuelve ni
+// dispara el .catch(). Con este tope, si la red no contesta a tiempo se usa
+// la copia guardada de inmediato en vez de dejar al usuario mirando una
+// pantalla en blanco. Bug real reportado por Kevin (26/08/2026): la app no
+// abrió en campo con 3G malo.
+const FETCH_TIMEOUT_MS = 4000;
 
 const ARCHIVOS_PRECACHE = [
   "./index.html",
@@ -91,12 +102,25 @@ function esArchivoDeLaApp(request) {
   return /\.(html|css|js)$/.test(url.pathname);
 }
 
+// fetch() normal no tiene límite de tiempo propio — con señal mala pero
+// presente puede quedar colgado sin nunca resolver ni rechazar. Esto arma
+// una carrera contra un timer: lo que responda primero gana.
+function fetchConTimeout(request, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Tiempo de espera agotado")), ms);
+    fetch(request, { cache: "no-store" }).then(
+      (respuesta) => { clearTimeout(timer); resolve(respuesta); },
+      (error) => { clearTimeout(timer); reject(error); }
+    );
+  });
+}
+
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
   if (esArchivoDeLaApp(event.request)) {
     event.respondWith(
-      fetch(event.request, { cache: "no-store" })
+      fetchConTimeout(event.request, FETCH_TIMEOUT_MS)
         .then((respuestaRed) => {
           if (respuestaRed && respuestaRed.status === 200) {
             const copia = respuestaRed.clone();
@@ -104,7 +128,7 @@ self.addEventListener("fetch", (event) => {
           }
           return respuestaRed;
         })
-        .catch(() => caches.match(event.request))
+        .catch(() => caches.match(event.request).then((r) => r || fetch(event.request)))
     );
     return;
   }
