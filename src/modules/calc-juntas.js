@@ -386,6 +386,18 @@ function tieneDatosMinimos(row) {
     if (esRedondo) return !(row.D === "" || row.D === null || n(row.D) <= 0);
     return !(row.F === "" || row.F === null || n(row.F) <= 0) && !(row.G === "" || row.G === null || n(row.G) <= 0);
   }
+  // Mismo problema puede pasar con "Ducto Redondo"/"Ducto Redondo Aislado":
+  // agregarDesdeLevantamiento() SIEMPRE guarda el diámetro en F/G (en cm,
+  // ver diametroLibreActivo ahí), nunca en D — pero es fácil que una
+  // importación externa (texto libre, .fss armado a mano, etc.) ponga el
+  // diámetro en D por ser lo que usan todos los demás tipos de tubería.
+  // Se acepta cualquiera de los dos formatos acá para no perder esas filas
+  // en silencio (encontrado 26/08/2026 armando un levantamiento de Kevin).
+  if (row.L === TIPO_DUCTO_RED || row.L === TIPO_DUCTO_RED_AISL) {
+    const tieneFG = !(row.F === "" || row.F === null || n(row.F) <= 0) && !(row.G === "" || row.G === null || n(row.G) <= 0);
+    const tieneD = !(row.D === "" || row.D === null || n(row.D) <= 0);
+    return tieneFG || tieneD;
+  }
   const req = camposRequeridos(row.L);
   if (req.D && (row.D === "" || row.D === null || n(row.D) <= 0)) return false;
   if (req.F && (row.F === "" || row.F === null || n(row.F) <= 0)) return false;
