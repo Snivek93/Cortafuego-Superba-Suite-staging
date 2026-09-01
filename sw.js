@@ -20,7 +20,7 @@
  * (se agrega o se saca un archivo de ARCHIVOS_PRECACHE) — no por ediciones
  * normales de contenido.
  */
-const CACHE_VERSION = "v1.0.67";
+const CACHE_VERSION = "v1.0.68";
 const CACHE_NAME = `cortafuego-hilti-${CACHE_VERSION}`;
 
 // Con señal mala pero presente (3G intermitente en obra), un fetch() sin
@@ -42,6 +42,7 @@ const ARCHIVOS_PRECACHE = [
   "./src/modules/archivo-estado-app.js",
   "./src/modules/proyectos.js",
   "./src/modules/firebase-auth.js",
+  "./src/modules/firestore-sync.js",
   "./src/modules/archivo-guardar-cargar.js",
   "./src/modules/calc-detalle-y-filtro.js",
   "./src/modules/calc-engine.js",
