@@ -12,6 +12,14 @@ var PROYECTO_ACTIVO_CREADO_EN = null;
 // algo mientras tanto (ver comentario largo en firestore-sync.js).
 var PROYECTO_ACTIVO_COMPARTIDO = false;
 var PROYECTO_ACTIVO_FS_VERSION = null;
+// true si ESTE dispositivo tiene el candado de edición del proyecto activo
+// (solo tiene sentido cuando PROYECTO_ACTIVO_COMPARTIDO es true). Si es
+// false en un proyecto compartido, la app deja editar localmente igual
+// (nunca se pierde trabajo), pero fsSubirCambios va a rechazar la subida
+// —las reglas de Firestore ya lo bloquean del lado servidor— así que el
+// aviso de "solo lectura" es la forma honesta de avisarlo antes de que
+// la persona escriba media hora pensando que se está guardando en la nube.
+var PROYECTO_ACTIVO_CANDADO_PROPIO = false;
 (function () {
 // ARCHIVO — Nuevo / Abrir / Guardar / Guardar como (comportamiento tipo Word)
 let ULTIMO_GUARDADO = null;
@@ -281,6 +289,7 @@ function marcarCambio() {
 let firestoreSyncTimer = null;
 let firestoreSyncEnCurso = false;
 let firestoreSyncPendiente = false;
+let avisandoSoloLectura = false;
 async function sincronizarConFirestoreAhora() {
   if (firestoreSyncEnCurso) { firestoreSyncPendiente = true; return; }
   if (!PROYECTO_ACTIVO_COMPARTIDO || !PROYECTO_ACTIVO_ID) return;
@@ -296,6 +305,7 @@ async function sincronizarConFirestoreAhora() {
     const resultado = await window.fsSubirCambios(PROYECTO_ACTIVO_ID, jsonSinImagenes, PROYECTO_ACTIVO_FS_VERSION);
     if (resultado.ok) {
       PROYECTO_ACTIVO_FS_VERSION = resultado.version;
+      avisandoSoloLectura = false; // ya se pudo guardar — si había aviso pendiente, ya no aplica
       return;
     }
     if (resultado.conflicto) {
@@ -304,10 +314,20 @@ async function sincronizarConFirestoreAhora() {
     }
     console.error("No se pudo sincronizar con Firestore:", resultado.error);
   } catch (e) {
-    // Sin señal es el caso esperado y frecuente (obra) — no se trata como
-    // fallo del autoguardado local, que ya terminó bien. Se reintenta solo
-    // en el próximo cambio.
-    console.error("Error de red al sincronizar con Firestore (se reintentará):", e);
+    // "permission-denied" es el caso esperado cuando este dispositivo NO
+    // tiene el candado (las reglas de Firestore lo rechazan del lado
+    // servidor) — se avisa una sola vez, distinto de un problema de red real.
+    if (e && e.code === "permission-denied") {
+      if (!avisandoSoloLectura) {
+        avisandoSoloLectura = true;
+        if (window.mostrarToast) mostrarToast("Tus cambios se están guardando localmente, pero no se suben a la nube todavía porque otra persona tiene el proyecto en edición.", "error");
+      }
+    } else {
+      // Sin señal es el caso esperado y frecuente (obra) — no se trata como
+      // fallo del autoguardado local, que ya terminó bien. Se reintenta solo
+      // en el próximo cambio.
+      console.error("Error de red al sincronizar con Firestore (se reintentará):", e);
+    }
   } finally {
     firestoreSyncEnCurso = false;
     if (firestoreSyncPendiente) { firestoreSyncPendiente = false; sincronizarConFirestoreAhora(); }
@@ -469,6 +489,7 @@ function cargarProyectoEnApp(data) {
 // tocar nada si el id no existe (ej. el puntero 'activo' quedó apuntando a
 // algo que se borró) — el que llama decide qué hacer en ese caso.
 async function abrirProyectoExistente(id) {
+  await soltarCandadoActivoSiHaceFalta(); // el proyecto que se estaba editando queda libre para otros
   let data = null;
   try {
     data = await idbLeerProyecto(id);
@@ -499,6 +520,7 @@ async function abrirProyectoExistente(id) {
 async function detectarSiEsCompartido(id) {
   PROYECTO_ACTIVO_COMPARTIDO = false;
   PROYECTO_ACTIVO_FS_VERSION = null;
+  PROYECTO_ACTIVO_CANDADO_PROPIO = false;
   if (!window.fsDescargarUltimaVersion || !window.usuarioActual) return;
   try {
     const remoto = await window.fsDescargarUltimaVersion(id);
@@ -508,11 +530,57 @@ async function detectarSiEsCompartido(id) {
     if (remoto) {
       PROYECTO_ACTIVO_COMPARTIDO = true;
       PROYECTO_ACTIVO_FS_VERSION = remoto.version;
+      await tomarCandadoSiCorresponde(id);
     }
   } catch (e) {
     // Sin señal, permiso denegado (no es tuyo ni te lo compartieron), o el
     // proyecto nunca se compartió — en cualquier caso, se sigue como
     // proyecto local normal.
+  }
+}
+
+// Intenta tomar el candado de edición del proyecto compartido que se acaba
+// de abrir. Si alguien más lo tiene (y no venció), se avisa una sola vez y
+// se sigue en modo local normal — NO se bloquea la UI de edición: es más
+// simple y más seguro dejar que la persona siga trabajando localmente
+// (nunca se pierde nada) que meterse a deshabilitar botones de módulos
+// distintos. Lo que sí cambia es que fsSubirCambios va a fallar (rechazado
+// por las reglas de Firestore) hasta que el otro suelte el candado.
+async function tomarCandadoSiCorresponde(id) {
+  if (!window.fsTomarCandado) return;
+  const user = window.usuarioActual ? window.usuarioActual() : null;
+  if (!user) return;
+  try {
+    const resultado = await window.fsTomarCandado(id, user.uid, user.displayName || user.email || "");
+    if (PROYECTO_ACTIVO_ID !== id) return; // se cambió de proyecto mientras tanto
+    PROYECTO_ACTIVO_CANDADO_PROPIO = !!resultado.ok;
+    if (!resultado.ok && window.mostrarToast) {
+      mostrarToast(`Solo lectura por ahora: ${resultado.ocupadoPor || "otra persona"} está editando este proyecto. Podés seguir viendo/anotando localmente; se sincroniza cuando quede libre.`);
+    }
+  } catch (e) {
+    // Sin señal u otro error — se sigue en modo local, sin candado propio.
+    PROYECTO_ACTIVO_CANDADO_PROPIO = false;
+  }
+}
+
+// Suelta el candado del proyecto activo si esta sesión lo tenía — se llama
+// SIEMPRE antes de cambiar de proyecto (abrir otro, crear uno nuevo, volver
+// a Proyectos) para no dejarlo tomado "de olvido" mientras el timeout de 5
+// minutos expira solo.
+async function soltarCandadoActivoSiHaceFalta() {
+  if (!PROYECTO_ACTIVO_COMPARTIDO || !PROYECTO_ACTIVO_CANDADO_PROPIO || !PROYECTO_ACTIVO_ID) {
+    PROYECTO_ACTIVO_CANDADO_PROPIO = false;
+    return;
+  }
+  const idPrevio = PROYECTO_ACTIVO_ID;
+  const user = window.usuarioActual ? window.usuarioActual() : null;
+  PROYECTO_ACTIVO_CANDADO_PROPIO = false;
+  if (!user || !window.fsSoltarCandado) return;
+  try {
+    await window.fsSoltarCandado(idPrevio, user.uid);
+  } catch (e) {
+    // Sin señal — el candado se libera solo por timeout (5 min) del lado
+    // de firestore-sync.js/reglas, no es catastrófico si esto falla acá.
   }
 }
 
@@ -522,6 +590,7 @@ async function detectarSiEsCompartido(id) {
 // nombre, PROJECT_INFO.nombre queda vacío y la Pantalla de Proyectos lo
 // muestra en "Borradores" con la fecha de creación.
 async function crearYAbrirProyectoNuevo() {
+  await soltarCandadoActivoSiHaceFalta();
   const id = "p_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
   PROYECTO_ACTIVO_ID = id;
   PROYECTO_ACTIVO_CREADO_EN = new Date().toISOString();
