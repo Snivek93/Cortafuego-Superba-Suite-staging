@@ -3,10 +3,10 @@
 // organización, con candado de edición y detección de conflicto offline.
 // ============================================================================
 // Alcance de esta entrega: sincroniza el payload JSON del proyecto (filas,
-// config, projectInfo — el mismo que ya arma datosProyectoActual()) SIN
-// fotos ni planos rasterizados. Esos siguen siendo solo locales (IndexedDB)
-// por ahora — subirlos a Firebase Storage es la siguiente entrega, separada
-// a propósito porque cambia la forma de leer/escribir imágenes.
+// config, projectInfo — el mismo que ya arma datosProyectoActual()). Las
+// fotos/planos viajan aparte por Firebase Storage (ver
+// firestore-storage-sync.js) — este archivo solo guarda y lee el mapa
+// liviano {key: url} en el campo imagenesUrls del documento.
 //
 // IndexedDB sigue siendo la única fuente de verdad para USO NORMAL de la
 // app (arranque, edición del día a día). Firestore es:
@@ -27,6 +27,7 @@
 //     candado: { uid, nombre, desde } | null
 //     versionSync: number             // sube 1 en cada fsSubirCambios exitoso
 //     payloadJson: string             // datosProyectoActual() sin imágenes, como JSON
+//     imagenesUrls: { key: url }      // fotos/planos subidos a Storage (opcional)
 //     actualizadoEn: timestamp servidor
 //   invitaciones/{emailSanitizado}
 //     pendientes: [{ proyectoId, nombre, rol, invitadoPor }]
@@ -199,10 +200,11 @@ function fsEscucharCandado(proyectoId, callback) {
 // Sync de contenido + detección de conflicto por versión
 // ---------------------------------------------------------------------------
 // payloadJson: el JSON de datosProyectoActual() SIN el campo de imágenes
-// (ver comentario de cabecera — fotos/planos rasterizados quedan para la
-// siguiente entrega). versionEsperada: la versión que este dispositivo leyó
-// la última vez que sincronizó (null si nunca sincronizó este proyecto en
-// esta sesión/dispositivo).
+// (ver firestore-storage-sync.js para el envío de fotos/planos aparte).
+// versionEsperada: la versión que este dispositivo leyó la última vez que
+// sincronizó (null si nunca sincronizó este proyecto en esta sesión/
+// dispositivo). imagenesUrls (opcional): mapa {key: url} armado por
+// fsSubirImagenesFaltantes en firestore-storage-sync.js.
 //
 // Devuelve:
 //   { ok: true, version: N }                         — subió limpio
@@ -210,7 +212,7 @@ function fsEscucharCandado(proyectoId, callback) {
 //     una versión distinta mientras este dispositivo no tenía esa versión
 //     como base; el llamador decide qué hacer (ver pedirEleccion en
 //     archivo-guardar-cargar.js, mismo patrón que "Abrir…" con id repetido).
-async function fsSubirCambios(proyectoId, payloadJson, versionEsperada) {
+async function fsSubirCambios(proyectoId, payloadJson, versionEsperada, imagenesUrls) {
   const ref = db().collection("proyectos").doc(proyectoId);
   return db().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
@@ -220,11 +222,19 @@ async function fsSubirCambios(proyectoId, payloadJson, versionEsperada) {
       return { ok: false, conflicto: true, versionRemota };
     }
     const versionNueva = versionRemota + 1;
-    tx.update(ref, {
+    const cambios = {
       payloadJson,
       versionSync: versionNueva,
       actualizadoEn: firebase.firestore.FieldValue.serverTimestamp(),
-    });
+    };
+    // imagenesUrls es opcional: solo se manda cuando hubo fotos que subir o
+    // que ya estaban en caché (ver fsSubirImagenesFaltantes en
+    // firestore-storage-sync.js). Si el proyecto no tiene fotos, se omite
+    // el campo en vez de escribir un objeto vacío innecesariamente.
+    if (imagenesUrls && Object.keys(imagenesUrls).length > 0) {
+      cambios.imagenesUrls = imagenesUrls;
+    }
+    tx.update(ref, cambios);
     return { ok: true, version: versionNueva };
   });
 }
@@ -233,7 +243,7 @@ async function fsDescargarUltimaVersion(proyectoId) {
   const snap = await db().collection("proyectos").doc(proyectoId).get();
   if (!snap.exists) return null;
   const data = snap.data();
-  return { payloadJson: data.payloadJson, version: data.versionSync || 0 };
+  return { payloadJson: data.payloadJson, version: data.versionSync || 0, imagenesUrls: data.imagenesUrls || {} };
 }
 
 window.fsAsegurarProyecto = fsAsegurarProyecto;
