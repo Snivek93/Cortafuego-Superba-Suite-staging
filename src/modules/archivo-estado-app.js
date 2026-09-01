@@ -5,6 +5,13 @@
 // proyectos.js los reasigna directamente al abrir/crear/borrar un proyecto.
 var PROYECTO_ACTIVO_ID = null;
 var PROYECTO_ACTIVO_CREADO_EN = null;
+// Fase 3 (proyectos compartidos): si el proyecto activo tiene documento en
+// Firestore, estas dos quedan seteadas al abrirlo/crearlo. FS_VERSION es la
+// versión que ESTE dispositivo leyó por última vez — es la base contra la
+// que se compara en cada fsSubirCambios para detectar si alguien más subió
+// algo mientras tanto (ver comentario largo en firestore-sync.js).
+var PROYECTO_ACTIVO_COMPARTIDO = false;
+var PROYECTO_ACTIVO_FS_VERSION = null;
 (function () {
 // ARCHIVO — Nuevo / Abrir / Guardar / Guardar como (comportamiento tipo Word)
 let ULTIMO_GUARDADO = null;
@@ -255,10 +262,123 @@ async function guardarAutoAhora() {
     guardadoEnCurso = false;
     if (guardadoPendiente) { guardadoPendiente = false; guardarAutoAhora(); }
   }
+  // El sync remoto va SIEMPRE después de que el guardado local terminó bien
+  // — IndexedDB sigue siendo la fuente de verdad, Firestore es destino, no
+  // origen. Si el guardado local falló arriba, tampoco se sube nada remoto.
+  if (PROYECTO_ACTIVO_COMPARTIDO && !FALLO_AUTOGUARDADO) sincronizarConFirestore();
 }
 function marcarCambio() {
   if (autosaveTimer) clearTimeout(autosaveTimer);
   autosaveTimer = setTimeout(guardarAutoAhora, 600);
+}
+
+// ---------------------------------------------------------------------------
+// Fase 3 — sync a Firestore para proyectos compartidos (solo cuando
+// PROYECTO_ACTIVO_COMPARTIDO). Separado del autoguardado local con su
+// propio debounce más largo (3s): cada fsSubirCambios es una transacción
+// de red, no tiene sentido dispararla en cada tecla como el guardado local.
+// ---------------------------------------------------------------------------
+let firestoreSyncTimer = null;
+let firestoreSyncEnCurso = false;
+let firestoreSyncPendiente = false;
+async function sincronizarConFirestoreAhora() {
+  if (firestoreSyncEnCurso) { firestoreSyncPendiente = true; return; }
+  if (!PROYECTO_ACTIVO_COMPARTIDO || !PROYECTO_ACTIVO_ID) return;
+  firestoreSyncEnCurso = true;
+  try {
+    // Se reusa exactamente el mismo payload que ya arma datosProyectoActual()
+    // y se le saca las imágenes con la misma función que usa el formato
+    // .fss — así el "payload sin fotos" que viaja a Firestore es consistente
+    // con el que ya se exporta/importa localmente. Las fotos NO se suben
+    // todavía (ver cabecera de firestore-sync.js).
+    const payload = datosProyectoActual();
+    const { jsonSinImagenes } = extraerImagenesGrandes(JSON.stringify(payload));
+    const resultado = await window.fsSubirCambios(PROYECTO_ACTIVO_ID, jsonSinImagenes, PROYECTO_ACTIVO_FS_VERSION);
+    if (resultado.ok) {
+      PROYECTO_ACTIVO_FS_VERSION = resultado.version;
+      return;
+    }
+    if (resultado.conflicto) {
+      avisarConflictoSync(resultado.versionRemota);
+      return;
+    }
+    console.error("No se pudo sincronizar con Firestore:", resultado.error);
+  } catch (e) {
+    // Sin señal es el caso esperado y frecuente (obra) — no se trata como
+    // fallo del autoguardado local, que ya terminó bien. Se reintenta solo
+    // en el próximo cambio.
+    console.error("Error de red al sincronizar con Firestore (se reintentará):", e);
+  } finally {
+    firestoreSyncEnCurso = false;
+    if (firestoreSyncPendiente) { firestoreSyncPendiente = false; sincronizarConFirestoreAhora(); }
+  }
+}
+function sincronizarConFirestore() {
+  if (firestoreSyncTimer) clearTimeout(firestoreSyncTimer);
+  firestoreSyncTimer = setTimeout(sincronizarConFirestoreAhora, 3000);
+}
+
+// Se dispara cuando fsSubirCambios detecta que otro dispositivo ya subió
+// una versión distinta a la que este dispositivo tenía como base — pasa
+// típicamente cuando dos personas editaron el mismo proyecto sin señal al
+// mismo tiempo y ambas recuperan conexión después. Mismo patrón de 3
+// opciones que ya usa "Abrir…" cuando se importa un .fss con id repetido
+// (ver pedirEleccion en archivo-guardar-cargar.js) — familiar para quien
+// ya usó esa pantalla.
+let avisandoConflicto = false;
+function avisarConflictoSync(versionRemota) {
+  if (avisandoConflicto) return; // no apilar el mismo aviso varias veces
+  avisandoConflicto = true;
+  pedirEleccion(
+    "Este proyecto cambió en otro dispositivo mientras este estaba sin conexión (o editando al mismo tiempo). ¿Qué querés hacer?",
+    [
+      { label: "Traer la versión más nueva (descarta tus cambios locales)", act: "traer", clase: "danger" },
+      { label: "Guardar tu versión como copia aparte", act: "copia", clase: "primary" },
+      { label: "Seguir editando la mía por ahora (decidir después)", act: "cancelar", clase: "secondary" },
+    ],
+    async (eleccion) => {
+      avisandoConflicto = false;
+      if (eleccion === "traer") {
+        try {
+          const remoto = await window.fsDescargarUltimaVersion(PROYECTO_ACTIVO_ID);
+          if (!remoto) { mostrarToast("No se pudo traer la versión remota.", "error"); return; }
+          const data = JSON.parse(remoto.payloadJson);
+          pushUndo();
+          cargarProyectoEnApp(data);
+          PROYECTO_ACTIVO_FS_VERSION = remoto.version;
+          marcarCambio(); // guarda esta versión traída también en IndexedDB local
+          mostrarToast("Se trajo la versión más nueva del proyecto.");
+        } catch (e) {
+          mostrarToast("No se pudo traer la versión remota: " + e.message, "error");
+        }
+      } else if (eleccion === "copia") {
+        const nuevoId = "p_" + Date.now().toString(36) + "_conflicto";
+        const payload = datosProyectoActual();
+        payload.id = nuevoId;
+        payload.guardadoEn = new Date().toISOString();
+        payload.creadoEn = payload.guardadoEn;
+        payload.projectInfo = Object.assign({}, payload.projectInfo, {
+          nombre: (payload.projectInfo.nombre || "Proyecto") + " (copia local sin sincronizar)",
+        });
+        try {
+          await idbGuardarProyecto(nuevoId, payload);
+          mostrarToast("Tu versión se guardó aparte como '" + payload.projectInfo.nombre + "'. Revisala en Proyectos y decidí cuál usar.");
+          // No se toca PROYECTO_ACTIVO_FS_VERSION: el proyecto activo sigue
+          // intentando sincronizar normal en el próximo cambio, contra la
+          // versión remota actual.
+          try {
+            const remoto = await window.fsDescargarUltimaVersion(PROYECTO_ACTIVO_ID);
+            if (remoto) PROYECTO_ACTIVO_FS_VERSION = remoto.version;
+          } catch (e2) {}
+        } catch (e) {
+          mostrarToast("No se pudo guardar la copia: " + e.message, "error");
+        }
+      }
+      // "cancelar": no hace nada — el próximo intento de sync va a volver
+      // a chocar y avisar de nuevo, lo cual es intencional (no se pierde
+      // el aviso silenciosamente).
+    }
+  );
 }
 
 // Migración desde el localStorage viejo: se corre una sola vez, la primera vez
@@ -366,7 +486,34 @@ async function abrirProyectoExistente(id) {
   ULTIMO_GUARDADO = data.guardadoEn ? new Date(data.guardadoEn) : null;
   FALLO_AUTOGUARDADO = false;
   actualizarIndicadorArchivo();
+  detectarSiEsCompartido(id); // no bloquea la apertura — corre aparte
   return true;
+}
+
+// Consulta Firestore para saber si este proyecto tiene documento ahí (fue
+// compartido en algún momento, por vos o por quien te lo compartió a vos).
+// Deliberadamente NO se guarda este dato en IndexedDB: si hoy no hay señal,
+// simplemente se trata como no-compartido para esta sesión (autoguardado
+// local normal, sin intentos de sync) — es el comportamiento correcto: sin
+// red no hay con qué sincronizar de todas formas.
+async function detectarSiEsCompartido(id) {
+  PROYECTO_ACTIVO_COMPARTIDO = false;
+  PROYECTO_ACTIVO_FS_VERSION = null;
+  if (!window.fsDescargarUltimaVersion || !window.usuarioActual) return;
+  try {
+    const remoto = await window.fsDescargarUltimaVersion(id);
+    // Si cambiamos de proyecto mientras esta consulta estaba en vuelo, no
+    // pisar el estado del proyecto que se abrió después.
+    if (PROYECTO_ACTIVO_ID !== id) return;
+    if (remoto) {
+      PROYECTO_ACTIVO_COMPARTIDO = true;
+      PROYECTO_ACTIVO_FS_VERSION = remoto.version;
+    }
+  } catch (e) {
+    // Sin señal, permiso denegado (no es tuyo ni te lo compartieron), o el
+    // proyecto nunca se compartió — en cualquier caso, se sigue como
+    // proyecto local normal.
+  }
 }
 
 // Crea un proyecto vacío y lo deja como activo. No escribe nada en IndexedDB
@@ -378,6 +525,8 @@ async function crearYAbrirProyectoNuevo() {
   const id = "p_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
   PROYECTO_ACTIVO_ID = id;
   PROYECTO_ACTIVO_CREADO_EN = new Date().toISOString();
+  PROYECTO_ACTIVO_COMPARTIDO = false; // un proyecto nuevo nunca nace compartido
+  PROYECTO_ACTIVO_FS_VERSION = null;
   try { await idbGuardarActivo(id); } catch (e) {}
   ROWS = []; ROWS_J = []; MANUAL_ITEMS = []; PLANOS = []; INFORMES_ACREDITACION = [];
   Object.assign(CONFIG, CONFIG_DEFAULT);
