@@ -193,9 +193,63 @@ function sincronizarCamposConfig() {
   const pf = document.getElementById("proj-fecha"); if (pf) pf.value = PROJECT_INFO.fecha;
 }
 
+// Arma el payload plano del proyecto activo (filas, config, planos, informes,
+// overrides de tablas UL si las hay) — usado por el guardado en IndexedDB y
+// por Guardar como/Exportar.
+function datosProyectoActual() {
+  const payload = {
+    tipo: "calculadora-cortafuego-hilti-proyecto",
+    version: 1,
+    fechaExportacion: new Date().toISOString(),
+    projectInfo: PROJECT_INFO,
+    config: CONFIG,
+    filas: ROWS.map(r => Object.assign({}, r)),
+    filasJuntas: ROWS_J.map(r => Object.assign({}, r)),
+    itemsManuales: MANUAL_ITEMS.map(m => { const c = Object.assign({}, m); delete c._id; return c; }),
+    planos: PLANOS,
+    informes: INFORMES_ACREDITACION,
+  };
+  if (JSON.stringify(MAIN_TABLE) !== MAIN_TABLE_DEFAULT_JSON) payload.mainTableOverride = MAIN_TABLE;
+  if (JSON.stringify(JUNTAS_TABLE) !== JUNTAS_TABLE_DEFAULT_JSON) payload.juntasTableOverride = JUNTAS_TABLE;
+  return payload;
+}
+
+// Carga datos de proyecto embebidos en un <script id="embedded-project-data">
+// del propio index.html (caso: un .html exportado con datos adentro).
+function cargarDatosEmbebidos() {
+  const tag = document.getElementById("embedded-project-data");
+  if (!tag) return false;
+  const txt = tag.textContent.trim();
+  if (!txt) return false;
+  try {
+    const data = JSON.parse(txt);
+    if (!data || !Array.isArray(data.filas) || data.filas.length === 0) return false;
+    ROWS = data.filas.map(f => Object.assign(nuevaFila(), f, { _id: typeof f._id === "number" ? f._id : ROW_SEQ++ }));
+    ROW_SEQ = Math.max(ROW_SEQ, ...ROWS.map(r => r._id), 0) + 1;
+    if (Array.isArray(data.filasJuntas)) {
+      ROWS_J = data.filasJuntas.map(f => Object.assign({}, f, { _id: typeof f._id === "number" ? f._id : ROW_J_SEQ++ }));
+      ROW_J_SEQ = Math.max(ROW_J_SEQ, ...ROWS_J.map(r => r._id), 0) + 1;
+    }
+    MANUAL_ITEMS = Array.isArray(data.itemsManuales) ? data.itemsManuales.map(m => Object.assign({}, m, { _id: MANUAL_ITEM_SEQ++ })) : [];
+    if (data.config) Object.assign(CONFIG, data.config);
+    if (data.projectInfo) Object.assign(PROJECT_INFO, data.projectInfo);
+    if (data.mainTableOverride) MAIN_TABLE = data.mainTableOverride;
+    if (data.juntasTableOverride) JUNTAS_TABLE = data.juntasTableOverride;
+    PLANOS = Array.isArray(data.planos) ? data.planos : [];
+    PLANO_SEQ = PLANOS.reduce((m, p) => Math.max(m, p.id || 0), 0) + 1;
+    INFORMES_ACREDITACION = Array.isArray(data.informes) ? data.informes : [];
+    INFORME_ACR_SEQ = INFORMES_ACREDITACION.reduce((m, i) => Math.max(m, i.id || 0), 0) + 1;
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 window.descargarArchivo = descargarArchivo;
 window.exportarProyectoJSON = exportarProyectoJSON;
 window.aplicarProyectoImportado = aplicarProyectoImportado;
 window.importarProyectoJSON = importarProyectoJSON;
 window.sincronizarCamposConfig = sincronizarCamposConfig;
+window.datosProyectoActual = datosProyectoActual;
+window.cargarDatosEmbebidos = cargarDatosEmbebidos;
 })();
