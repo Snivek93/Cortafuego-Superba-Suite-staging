@@ -711,19 +711,12 @@ async function initApp() {
   document.getElementById("btn-export-excel").addEventListener("click", exportarLevantamientoExcel);
   document.getElementById("btn-export-excel-lev-pen").addEventListener("click", exportarLevantamientoPenetrantesExcel);
   document.getElementById("btn-export-excel-lev-juntas").addEventListener("click", exportarLevantamientoJuntasExcel);
-  document.getElementById("btn-import-txt").addEventListener("click", () => {
-    document.getElementById("file-import-txt").click();
-  });
   document.getElementById("file-import-json").addEventListener("change", (e) => {
     if (e.target.files[0]) importarProyectoJSON(e.target.files[0]);
     e.target.value = "";
   });
   document.getElementById("file-import-excel").addEventListener("change", (e) => {
     if (e.target.files[0]) importarExcel(e.target.files[0]);
-    e.target.value = "";
-  });
-  document.getElementById("file-import-txt").addEventListener("change", (e) => {
-    if (e.target.files[0]) importarTxt(e.target.files[0]);
     e.target.value = "";
   });
 
