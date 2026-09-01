@@ -20,7 +20,7 @@
  * (se agrega o se saca un archivo de ARCHIVOS_PRECACHE) — no por ediciones
  * normales de contenido.
  */
-const CACHE_VERSION = "v1.0.66";
+const CACHE_VERSION = "v1.0.67";
 const CACHE_NAME = `cortafuego-hilti-${CACHE_VERSION}`;
 
 // Con señal mala pero presente (3G intermitente en obra), un fetch() sin
@@ -51,7 +51,6 @@ const ARCHIVOS_PRECACHE = [
   "./src/modules/data-ul-systems.js",
   "./src/modules/excel-export-import.js",
   "./src/modules/helpers.js",
-  "./src/modules/importar-texto-libre.js",
   "./src/modules/informes-acreditacion.js",
   "./src/modules/pdf-comun.js",
   "./src/modules/pdf-memoria.js",
