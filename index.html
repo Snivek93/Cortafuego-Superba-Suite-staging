@@ -160,7 +160,6 @@
         <button class="dropdown-item dropdown-item-sub" id="btn-toggle-excel-texto"><svg class="icon"><use href="#i-database"/></svg>Excel y texto<svg class="icon icon-chevron-right"><use href="#i-chevron-right"/></svg></button>
         <div class="dropdown-sub-panel" id="dropdown-sub-panel-excel">
           <button class="dropdown-item" id="btn-import-excel"><svg class="icon"><use href="#i-upload"/></svg>Cargar Excel</button>
-          <button class="dropdown-item" id="btn-import-txt"><svg class="icon"><use href="#i-upload"/></svg>Cargar texto</button>
           <div class="dropdown-sep"></div>
           <button class="dropdown-item" id="btn-export-excel"><svg class="icon"><use href="#i-download"/></svg>Exportar Penetrantes</button>
           <button class="dropdown-item" id="btn-export-excel-lev-pen"><svg class="icon"><use href="#i-download"/></svg>Exportar Lev. Penetrantes</button>
@@ -169,7 +168,6 @@
       </div>
       <input type="file" id="file-import-json" accept=".fss,.json,application/json" hidden>
       <input type="file" id="file-import-excel" accept=".xlsx,.xlsm,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12,application/vnd.ms-excel" hidden>
-      <input type="file" id="file-import-txt" accept=".txt,text/plain" hidden>
     </div>
     <div class="dropdown" id="dropdown-pdf">
       <button class="header-icon-btn" id="btn-menu-pdf" title="PDF" aria-label="PDF"><svg class="icon"><use href="#i-download"/></svg></button>
@@ -690,7 +688,6 @@
 <script src="src/modules/ui-comun-y-cuantificacion.js"></script>
 <script src="src/modules/archivo-guardar-cargar.js"></script>
 <script src="src/modules/excel-export-import.js"></script>
-<script src="src/modules/importar-texto-libre.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-auth-compat.js"></script>
 <script src="src/modules/firebase-auth.js"></script>
