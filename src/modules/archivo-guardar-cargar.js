@@ -256,4 +256,8 @@ window.cargarDatosEmbebidos = cargarDatosEmbebidos;
 // Firestore sin las fotos — misma separación imágenes/JSON que ya usa el
 // formato .fss, para no duplicar esa lógica.
 window.extraerImagenesGrandes = extraerImagenesGrandes;
+// Usada por firestore-storage-sync.js para reconstruir un proyecto con sus
+// fotos reales después de bajarlas de Firebase Storage — mismo mecanismo
+// que ya usa "Abrir…" con un .fss, reaplicado acá.
+window.reinsertarImagenesGrandes = reinsertarImagenesGrandes;
 })();
