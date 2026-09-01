@@ -252,4 +252,8 @@ window.importarProyectoJSON = importarProyectoJSON;
 window.sincronizarCamposConfig = sincronizarCamposConfig;
 window.datosProyectoActual = datosProyectoActual;
 window.cargarDatosEmbebidos = cargarDatosEmbebidos;
+// Usada por archivo-estado-app.js (Fase 3) para armar el payload que viaja a
+// Firestore sin las fotos — misma separación imágenes/JSON que ya usa el
+// formato .fss, para no duplicar esa lógica.
+window.extraerImagenesGrandes = extraerImagenesGrandes;
 })();
