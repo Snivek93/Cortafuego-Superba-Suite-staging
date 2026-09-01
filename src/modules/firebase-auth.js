@@ -319,7 +319,29 @@ let _yaResolvido = false;
 
 function resolverConUsuario(user) {
   ocultarOverlay();
-  if (!_yaResolvido) { _yaResolvido = true; _resolverEsperaAuth(user); }
+  if (!_yaResolvido) {
+    _yaResolvido = true;
+    resolverInvitacionesSiHaceFalta(user);
+    _resolverEsperaAuth(user);
+  }
+}
+
+// Fase 3: mueve cualquier invitación pendiente de este correo a los
+// proyectos correspondientes. No bloquea el arranque de la app — corre
+// aparte y en silencio; si el usuario no tenía ninguna invitación (el caso
+// normal) esto no hace nada visible. Sin señal simplemente falla y se
+// reintenta en el próximo login, no hay nada que perder.
+async function resolverInvitacionesSiHaceFalta(user) {
+  if (!window.fsResolverInvitacionesPendientes || !user.email) return;
+  try {
+    const resueltas = await window.fsResolverInvitacionesPendientes(user.uid, user.email);
+    if (resueltas.length > 0 && window.mostrarToast) {
+      const nombres = resueltas.map((r) => r.nombre || "un proyecto").join(", ");
+      mostrarToast(`Ahora tenés acceso a: ${nombres}.`);
+    }
+  } catch (e) {
+    console.error("No se pudieron resolver invitaciones pendientes:", e);
+  }
 }
 
 firebase.auth().onAuthStateChanged((user) => {
