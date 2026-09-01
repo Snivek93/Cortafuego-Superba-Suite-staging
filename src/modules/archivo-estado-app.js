@@ -298,11 +298,24 @@ async function sincronizarConFirestoreAhora() {
     // Se reusa exactamente el mismo payload que ya arma datosProyectoActual()
     // y se le saca las imágenes con la misma función que usa el formato
     // .fss — así el "payload sin fotos" que viaja a Firestore es consistente
-    // con el que ya se exporta/importa localmente. Las fotos NO se suben
-    // todavía (ver cabecera de firestore-sync.js).
+    // con el que ya se exporta/importa localmente. Las fotos se suben aparte
+    // a Firebase Storage (firestore-storage-sync.js) y solo sus URLs viajan
+    // dentro del documento — el base64 completo no cabría cómodo pasadas
+    // unas pocas fotos.
     const payload = datosProyectoActual();
-    const { jsonSinImagenes } = extraerImagenesGrandes(JSON.stringify(payload));
-    const resultado = await window.fsSubirCambios(PROYECTO_ACTIVO_ID, jsonSinImagenes, PROYECTO_ACTIVO_FS_VERSION);
+    const { jsonSinImagenes, imagenesJson } = extraerImagenesGrandes(JSON.stringify(payload));
+    let imagenesUrls = null;
+    if (window.fsSubirImagenesFaltantes) {
+      try {
+        imagenesUrls = await window.fsSubirImagenesFaltantes(PROYECTO_ACTIVO_ID, imagenesJson);
+      } catch (e) {
+        // Si falla la subida de fotos (red, cuota) no se bloquea el sync del
+        // texto — las filas/config son lo más importante y lo más chico. Las
+        // fotos se reintentan solas en el próximo autoguardado.
+        console.error("No se pudieron subir las fotos a Storage (se reintenta después):", e);
+      }
+    }
+    const resultado = await window.fsSubirCambios(PROYECTO_ACTIVO_ID, jsonSinImagenes, PROYECTO_ACTIVO_FS_VERSION, imagenesUrls);
     if (resultado.ok) {
       PROYECTO_ACTIVO_FS_VERSION = resultado.version;
       avisandoSoloLectura = false; // ya se pudo guardar — si había aviso pendiente, ya no aplica
@@ -362,7 +375,16 @@ function avisarConflictoSync(versionRemota) {
         try {
           const remoto = await window.fsDescargarUltimaVersion(PROYECTO_ACTIVO_ID);
           if (!remoto) { mostrarToast("No se pudo traer la versión remota.", "error"); return; }
-          const data = JSON.parse(remoto.payloadJson);
+          let jsonConImagenes = remoto.payloadJson;
+          if (remoto.imagenesUrls && Object.keys(remoto.imagenesUrls).length > 0 && window.fsDescargarImagenesComoJson) {
+            try {
+              const imagenesJson = await window.fsDescargarImagenesComoJson(remoto.imagenesUrls);
+              jsonConImagenes = reinsertarImagenesGrandes(remoto.payloadJson, imagenesJson);
+            } catch (e2) {
+              console.error("No se pudieron bajar las fotos de la versión remota (se trae el resto igual):", e2);
+            }
+          }
+          const data = JSON.parse(jsonConImagenes);
           pushUndo();
           cargarProyectoEnApp(data);
           PROYECTO_ACTIVO_FS_VERSION = remoto.version;
