@@ -111,6 +111,7 @@ function tarjetaProyectoHTML(id, data, esBorrador, modoManual) {
         <p class="proy-card-sub">${escapeHtml(sub)}</p>
       </div>
       <div class="proy-card-right">
+        ${!esBorrador ? `<button type="button" class="proy-card-compartir" data-id="${escapeHtml(id)}" title="Compartir" aria-label="Compartir"><svg class="icon"><use href="#i-share"/></svg></button>` : ""}
         ${!esBorrador ? `<button type="button" class="proy-card-mover" data-id="${escapeHtml(id)}" title="Mover a carpeta" aria-label="Mover a carpeta"><svg class="icon"><use href="#i-folder"/></svg></button>` : ""}
         <button type="button" class="proy-card-borrar" data-id="${escapeHtml(id)}" title="Borrar proyecto" aria-label="Borrar proyecto">
           <svg class="icon"><use href="#i-trash"/></svg>
@@ -276,6 +277,71 @@ function abrirModalMoverACarpeta(proyectoId) {
     else if (act.startsWith("carpeta:")) CARPETA_ASIGNACIONES[proyectoId] = act.slice(8);
     guardarAsignaciones();
     renderPantallaProyectos(!!window.PROYECTO_ACTIVO_ID);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Compartir (Fase 3) — crea/asegura el documento del proyecto en Firestore
+// (si es la primera vez que se comparte) e invita por correo. Requiere
+// conexión — sin señal simplemente avisa y no rompe nada local.
+// ---------------------------------------------------------------------------
+function abrirModalCompartir(proyectoId, nombreProyecto) {
+  if (!window.fsCompartirProyecto || !window.fsAsegurarProyecto) {
+    if (window.mostrarToast) mostrarToast("Compartir todavía no está disponible en esta versión.", "error");
+    return;
+  }
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <p style="font-weight:600;margin:0 0 2px;">Compartir "${escapeHtml(nombreProyecto || "proyecto")}"</p>
+      <p style="font-size:13px;color:var(--text-muted, #888);margin:0 0 12px;">Se invita por correo. Si la persona todavía no tiene cuenta, va a quedar pendiente hasta que cree una con ese mismo correo.</p>
+      <input type="email" id="proy-compartir-email" placeholder="correo@superba.cr" style="width:100%;box-sizing:border-box;height:40px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--fs-base);margin-bottom:4px;" />
+      <p class="auth-error" id="proy-compartir-error" style="display:none;"></p>
+      <div class="modal-actions">
+        <button class="secondary" data-act="cancel">Cancelar</button>
+        <button class="primary" data-act="compartir">Compartir</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const input = document.getElementById("proy-compartir-email");
+  input.focus();
+
+  const hacerCompartir = async () => {
+    const email = input.value.trim().toLowerCase();
+    const errorEl = document.getElementById("proy-compartir-error");
+    if (!email || !email.includes("@")) {
+      errorEl.textContent = "Ingresá un correo válido.";
+      errorEl.style.display = "block";
+      return;
+    }
+    const user = window.usuarioActual ? window.usuarioActual() : null;
+    if (!user) { errorEl.textContent = "No se pudo identificar tu cuenta."; errorEl.style.display = "block"; return; }
+    if (email === (user.email || "").toLowerCase()) {
+      errorEl.textContent = "Ese es tu propio correo.";
+      errorEl.style.display = "block";
+      return;
+    }
+    const btn = overlay.querySelector('[data-act="compartir"]');
+    btn.disabled = true;
+    const textoOriginal = btn.textContent;
+    btn.textContent = "Un momento…";
+    try {
+      await window.fsAsegurarProyecto(proyectoId, { nombre: nombreProyecto, ownerId: user.uid, ownerEmail: user.email || "" });
+      await window.fsCompartirProyecto(proyectoId, nombreProyecto, email, "editor", user.email || "");
+      overlay.remove();
+      if (window.mostrarToast) mostrarToast(`Invitación enviada a ${email}. Va a ver el proyecto en su próximo inicio de sesión.`);
+    } catch (e) {
+      errorEl.textContent = e && e.message ? e.message : "No se pudo compartir. Revisá tu conexión y probá de nuevo.";
+      errorEl.style.display = "block";
+      btn.disabled = false;
+      btn.textContent = textoOriginal;
+    }
+  };
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") hacerCompartir(); });
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.dataset.act === "cancel") { overlay.remove(); return; }
+    if (e.target.dataset.act === "compartir") hacerCompartir();
   });
 }
 
@@ -551,6 +617,17 @@ async function renderPantallaProyectos(permitirCerrar) {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       abrirModalMoverACarpeta(btn.getAttribute("data-id"));
+    });
+  });
+
+  // --- Compartir ---
+  overlay.querySelectorAll(".proy-card-compartir").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute("data-id");
+      const proyecto = conNombre.find((p) => p.id === id);
+      const nombreProyecto = proyecto && proyecto.data.projectInfo ? proyecto.data.projectInfo.nombre : "";
+      abrirModalCompartir(id, nombreProyecto);
     });
   });
 
