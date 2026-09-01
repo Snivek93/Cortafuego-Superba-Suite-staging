@@ -492,7 +492,16 @@ async function renderPantallaProyectos(permitirCerrar) {
         if (idsLocales.has(remoto.id)) continue;
         if (!remoto.payloadJson) continue; // el dueño todavía no guardó nada sincronizable
         try {
-          const data = JSON.parse(remoto.payloadJson);
+          let jsonConImagenes = remoto.payloadJson;
+          if (remoto.imagenesUrls && Object.keys(remoto.imagenesUrls).length > 0 && window.fsDescargarImagenesComoJson && window.reinsertarImagenesGrandes) {
+            try {
+              const imagenesJson = await window.fsDescargarImagenesComoJson(remoto.imagenesUrls);
+              jsonConImagenes = window.reinsertarImagenesGrandes(remoto.payloadJson, imagenesJson);
+            } catch (e2) {
+              console.error("No se pudieron bajar las fotos del proyecto compartido", remoto.id, e2);
+            }
+          }
+          const data = JSON.parse(jsonConImagenes);
           data.id = remoto.id;
           data.guardadoEn = data.guardadoEn || new Date().toISOString();
           data.creadoEn = data.creadoEn || data.guardadoEn;
