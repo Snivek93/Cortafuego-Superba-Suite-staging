@@ -90,7 +90,7 @@ function ordenarCarpetas(lista, modo) {
 // ---------------------------------------------------------------------------
 // HTML de tarjetas
 // ---------------------------------------------------------------------------
-function tarjetaProyectoHTML(id, data, esBorrador, modoManual) {
+function tarjetaProyectoHTML(id, data, esBorrador, modoManual, esCompartido) {
   const nombre = esBorrador
     ? (formatearFechaCorta(data.creadoEn || data.guardadoEn) || "Borrador")
     : ((data.projectInfo && data.projectInfo.nombre) || "Sin nombre");
@@ -107,7 +107,7 @@ function tarjetaProyectoHTML(id, data, esBorrador, modoManual) {
       ${arrastrable ? `draggable="true" data-drag-item="1"` : ""}>
       ${arrastrable ? `<svg class="icon proy-card-grip"><use href="#i-move"/></svg>` : ""}
       <div class="proy-card-info">
-        <p class="proy-card-nombre">${escapeHtml(nombre)}</p>
+        <p class="proy-card-nombre">${escapeHtml(nombre)}${esCompartido ? `<span class="badge-manual">Compartido</span>` : ""}</p>
         <p class="proy-card-sub">${escapeHtml(sub)}</p>
       </div>
       <div class="proy-card-right">
@@ -476,6 +476,38 @@ async function renderPantallaProyectos(permitirCerrar) {
   let lista = [];
   try { lista = await window.idbListarProyectos(); } catch (e) { lista = []; }
 
+  // Fase 3: proyectos donde soy editor (alguien más me los compartió). Los
+  // que todavía no tengo localmente se traen y guardan en IndexedDB ahora
+  // mismo (primera vez) — los que ya tengo localmente NO se pisan acá, para
+  // no perder ediciones locales por encima de lo que hay en Firestore; ese
+  // caso ya lo cubre la detección de conflicto al guardar/sincronizar.
+  const idsCompartidos = new Set();
+  const user = window.usuarioActual ? window.usuarioActual() : null;
+  if (user && window.fsListarProyectosCompartidosConmigo) {
+    try {
+      const remotos = await window.fsListarProyectosCompartidosConmigo(user.uid);
+      const idsLocales = new Set(lista.map((p) => p.id));
+      for (const remoto of remotos) {
+        idsCompartidos.add(remoto.id);
+        if (idsLocales.has(remoto.id)) continue;
+        if (!remoto.payloadJson) continue; // el dueño todavía no guardó nada sincronizable
+        try {
+          const data = JSON.parse(remoto.payloadJson);
+          data.id = remoto.id;
+          data.guardadoEn = data.guardadoEn || new Date().toISOString();
+          data.creadoEn = data.creadoEn || data.guardadoEn;
+          await window.idbGuardarProyecto(remoto.id, data);
+          lista.push({ id: remoto.id, data });
+        } catch (e) {
+          console.error("No se pudo traer el proyecto compartido", remoto.id, e);
+        }
+      }
+    } catch (e) {
+      // Sin señal, o simplemente nadie te compartió nada — se sigue normal
+      // con lo que ya hay localmente.
+    }
+  }
+
   const conNombre = [];
   const borradores = [];
   lista.forEach(({ id, data }) => {
@@ -518,7 +550,7 @@ async function renderPantallaProyectos(permitirCerrar) {
        ${controlOrden}
        <div class="proy-lista" id="proy-lista-principal">
          ${carpetasOrdenadas.map(c => tarjetaCarpetaHTML(c, conNombre.filter(p => CARPETA_ASIGNACIONES[p.id] === c.id).length)).join("")}
-         ${proyectosOrdenados.map(p => tarjetaProyectoHTML(p.id, p.data, false, modoManual)).join("")}
+         ${proyectosOrdenados.map(p => tarjetaProyectoHTML(p.id, p.data, false, modoManual, idsCompartidos.has(p.id))).join("")}
        </div>`
     : "";
   const btnNuevaCarpeta = puedeCrearSubcarpeta
