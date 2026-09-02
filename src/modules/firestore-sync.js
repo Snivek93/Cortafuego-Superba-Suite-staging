@@ -248,8 +248,15 @@ async function fsSubirCambios(proyectoId, payloadJson, versionEsperada, imagenes
     // que ya estaban en caché (ver fsSubirImagenesFaltantes en
     // firestore-storage-sync.js). Si el proyecto no tiene fotos, se omite
     // el campo en vez de escribir un objeto vacío innecesariamente.
+    //
+    // MEZCLA, no reemplazo: si esta subida trae fotos nuevas pero ALGUNA
+    // foto de una subida anterior falló y quedó pendiente (ver comentario
+    // en fsSubirImagenesFaltantes), un reemplazo completo del campo la
+    // desaparecería de Firestore aunque siga bien subida. Bug real
+    // encontrado esta sesión: una foto que fallaba al subir dejaba el
+    // informe con la foto en blanco para siempre, sin aviso.
     if (imagenesUrls && Object.keys(imagenesUrls).length > 0) {
-      cambios.imagenesUrls = imagenesUrls;
+      cambios.imagenesUrls = Object.assign({}, snap.data().imagenesUrls || {}, imagenesUrls);
     }
     tx.update(ref, cambios);
     return { ok: true, version: versionNueva };

@@ -44,14 +44,18 @@ function hashLiviano(str) {
 }
 
 // Sube las fotos que cambiaron desde la última vez (comparando por hash
-// contra una caché local en IndexedDB, clave por proyecto) y devuelve el
-// mapa {key: url} completo (las que no cambiaron reusan la url ya
-// guardada, sin re-subir). imagenesJson es el string tal cual lo devuelve
-// extraerImagenesGrandes().
+// contra una caché local en IndexedDB, clave por proyecto). imagenesJson es
+// el string tal cual lo devuelve extraerImagenesGrandes().
+// Devuelve { urls, algunaFallo }:
+//   urls        — mapa {key: url} de las fotos que SÍ están listas (subidas
+//                 ahora o reusadas de caché). Puede venir incompleto.
+//   algunaFallo — true si al menos una foto no se pudo subir esta vez (cada
+//                 foto se intenta por separado — ver comentario abajo — así
+//                 que una que falla no tumba a las demás).
 async function fsSubirImagenesFaltantes(proyectoId, imagenesJson) {
   const imagenes = JSON.parse(imagenesJson || "{}");
   const claves = Object.keys(imagenes);
-  if (claves.length === 0) return {};
+  if (claves.length === 0) return { urls: {}, algunaFallo: false };
 
   const claveCache = "fsImagenesCache:" + proyectoId;
   let cache = {};
@@ -63,6 +67,7 @@ async function fsSubirImagenesFaltantes(proyectoId, imagenesJson) {
 
   const urls = {};
   let cacheCambio = false;
+  let algunaFallo = false;
   for (const key of claves) {
     const dataUrl = imagenes[key];
     const hash = hashLiviano(dataUrl);
@@ -70,17 +75,27 @@ async function fsSubirImagenesFaltantes(proyectoId, imagenesJson) {
       urls[key] = cache[key].url;
       continue;
     }
-    const ref = storage().ref("proyectos/" + proyectoId + "/" + key);
-    await ref.putString(dataUrl, "data_url");
-    const url = await ref.getDownloadURL();
-    urls[key] = url;
-    cache[key] = { hash, url };
-    cacheCambio = true;
+    // Cada foto en su propio try/catch — antes, si UNA foto fallaba (red
+    // mala a mitad de la subida, típico en obra), la excepción tumbaba la
+    // función completa y se perdían también las fotos que sí habían
+    // subido bien en esta misma pasada (o que ya estaban en caché de una
+    // subida anterior). Bug real encontrado esta sesión.
+    try {
+      const ref = storage().ref("proyectos/" + proyectoId + "/" + key);
+      await ref.putString(dataUrl, "data_url");
+      const url = await ref.getDownloadURL();
+      urls[key] = url;
+      cache[key] = { hash, url };
+      cacheCambio = true;
+    } catch (e) {
+      algunaFallo = true;
+      console.error("No se pudo subir la foto " + key + " (se reintenta después):", e);
+    }
   }
   if (cacheCambio && window.idbGuardarMetaClave) {
     try { await window.idbGuardarMetaClave(claveCache, cache); } catch (e) { /* best-effort */ }
   }
-  return urls;
+  return { urls, algunaFallo };
 }
 
 // Descarga cada foto de su url y arma el mismo formato de string que
