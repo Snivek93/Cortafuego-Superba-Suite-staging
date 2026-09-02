@@ -110,7 +110,10 @@ function aplicarProyectoImportado(data) {
   mostrarToast(`Proyecto cargado: ${ROWS.length} fila(s).`);
 }
 
-function pedirEleccion(mensaje, opciones, onElegir) {
+// forzar=true: no se puede descartar tocando fuera del modal — para el
+// caso de conflicto al reconectar, donde Kevin pidió que la persona SÍ o
+// SÍ elija (traer o copia), sin dejarlo pendiente para después.
+function pedirEleccion(mensaje, opciones, onElegir, forzar) {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   const botones = opciones.map(o => `<button class="${o.clase || "secondary"}" data-act="${o.act}">${escapeHtml(o.label)}</button>`).join("");
@@ -121,7 +124,7 @@ function pedirEleccion(mensaje, opciones, onElegir) {
     </div>`;
   document.body.appendChild(overlay);
   overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) { overlay.remove(); return; }
+    if (e.target === overlay) { if (!forzar) overlay.remove(); return; }
     const act = e.target.dataset.act;
     if (act) { overlay.remove(); onElegir(act); }
   });
@@ -260,4 +263,13 @@ window.extraerImagenesGrandes = extraerImagenesGrandes;
 // fotos reales después de bajarlas de Firebase Storage — mismo mecanismo
 // que ya usa "Abrir…" con un .fss, reaplicado acá.
 window.reinsertarImagenesGrandes = reinsertarImagenesGrandes;
+// BUG ENCONTRADO Y CORREGIDO esta sesión: pedirEleccion nunca estuvo
+// expuesta en window. avisarConflictoSync en archivo-estado-app.js (otra
+// IIFE, no ve variables de esta) la llamaba directo desde antes de Fase 3 —
+// cada vez que un conflicto real se disparaba, tiraba un ReferenceError que
+// el catch genérico de sincronizarConFirestoreAhora atrapaba y registraba
+// como si fuera un simple corte de red. El modal de conflicto JAMÁS
+// apareció en producción ni en staging. Encontrado al probar con Playwright
+// el nuevo aviso de reconexión (que llama a la misma función).
+window.pedirEleccion = pedirEleccion;
 })();

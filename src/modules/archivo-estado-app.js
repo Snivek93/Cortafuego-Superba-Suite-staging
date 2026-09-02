@@ -20,6 +20,18 @@ var PROYECTO_ACTIVO_FS_VERSION = null;
 // aviso de "solo lectura" es la forma honesta de avisarlo antes de que
 // la persona escriba media hora pensando que se está guardando en la nube.
 var PROYECTO_ACTIVO_CANDADO_PROPIO = false;
+// true si el proyecto activo está abierto en modo solo lectura porque otra
+// persona tiene el candado (ver aplicarModoSoloLectura). Se revisa al abrir
+// (tomarCandadoSiCorresponde) — bloqueo "a la puerta": ningún módulo
+// individual (Levantamiento/Planos/Informes) necesita saber de esto, se
+// resuelve con una clase CSS en <main> (ver styles.css).
+var PROYECTO_ACTIVO_SOLO_LECTURA = false;
+// true si hubo alguna edición del proyecto activo desde que se abrió (o
+// desde la última vez que se confirmó contra Firestore). Se usa SOLO para
+// decidir si un reconecte necesita forzar el modal de conflicto — si no
+// hubo ediciones locales, no hay nada que perder y se adopta la versión
+// remota en silencio.
+var PROYECTO_ACTIVO_HUBO_EDICION = false;
 (function () {
 // ARCHIVO — Nuevo / Abrir / Guardar / Guardar como (comportamiento tipo Word)
 let ULTIMO_GUARDADO = null;
@@ -276,6 +288,7 @@ async function guardarAutoAhora() {
   if (PROYECTO_ACTIVO_COMPARTIDO && !FALLO_AUTOGUARDADO) sincronizarConFirestore();
 }
 function marcarCambio() {
+  if (PROYECTO_ACTIVO_ID) PROYECTO_ACTIVO_HUBO_EDICION = true;
   if (autosaveTimer) clearTimeout(autosaveTimer);
   autosaveTimer = setTimeout(guardarAutoAhora, 600);
 }
@@ -318,6 +331,7 @@ async function sincronizarConFirestoreAhora() {
     const resultado = await window.fsSubirCambios(PROYECTO_ACTIVO_ID, jsonSinImagenes, PROYECTO_ACTIVO_FS_VERSION, imagenesUrls);
     if (resultado.ok) {
       PROYECTO_ACTIVO_FS_VERSION = resultado.version;
+      PROYECTO_ACTIVO_HUBO_EDICION = false; // ya está confirmado contra Firestore
       avisandoSoloLectura = false; // ya se pudo guardar — si había aviso pendiente, ya no aplica
       return;
     }
@@ -351,6 +365,66 @@ function sincronizarConFirestore() {
   firestoreSyncTimer = setTimeout(sincronizarConFirestoreAhora, 3000);
 }
 
+// ---------------------------------------------------------------------------
+// Reconexión — cierra el hueco de "abrí offline sin saber que era
+// compartido, edité, y al volver la señal la app siguió como si nada".
+// Antes de esto, un proyecto abierto sin red nunca aprendía que estaba
+// compartido (detectarSiEsCompartido falla en silencio sin señal), así que
+// el autoguardado a Firestore JAMÁS se disparaba ni con la señal de vuelta.
+// ---------------------------------------------------------------------------
+let reconexionEnCurso = false;
+async function manejarReconexion() {
+  if (reconexionEnCurso || !PROYECTO_ACTIVO_ID) return;
+  if (!window.fsDescargarUltimaVersion || !window.usuarioActual || !window.usuarioActual()) return;
+  reconexionEnCurso = true;
+  const idAlEmpezar = PROYECTO_ACTIVO_ID;
+  try {
+    const remoto = await window.fsDescargarUltimaVersion(idAlEmpezar);
+    if (PROYECTO_ACTIVO_ID !== idAlEmpezar) return; // se cambió de proyecto mientras tanto
+    if (!remoto) return; // proyecto nunca compartido — nada que reconciliar
+    PROYECTO_ACTIVO_COMPARTIDO = true;
+    const versionDesconocidaOAtrasada =
+      PROYECTO_ACTIVO_FS_VERSION === null || remoto.version !== PROYECTO_ACTIVO_FS_VERSION;
+    if (PROYECTO_ACTIVO_HUBO_EDICION && versionDesconocidaOAtrasada) {
+      avisarConflictoAlReconectar(remoto);
+    } else {
+      // Sin ediciones locales sin confirmar (o ya estábamos al día): no hay
+      // nada que perder, se adopta la versión remota como referencia sin
+      // interrumpir a nadie, y recién ahí se revisa el candado real.
+      PROYECTO_ACTIVO_FS_VERSION = remoto.version;
+      await tomarCandadoSiCorresponde(idAlEmpezar);
+    }
+  } catch (e) {
+    // Sin señal de verdad (falso positivo del evento 'online') u otro
+    // error — se sigue en modo local, se reintenta en la próxima señal.
+  } finally {
+    reconexionEnCurso = false;
+  }
+}
+window.addEventListener("online", manejarReconexion);
+
+// Variante de avisarConflictoSync SOLO para el caso de reconexión tras
+// haber editado offline: dos opciones nada más (traer / copia), sin
+// "seguir editando por ahora" — decisión explícita de Kevin de forzar una
+// elección en el momento en vez de dejarlo pendiente. forzar=true en
+// pedirEleccion además impide cerrar el modal tocando fuera.
+function avisarConflictoAlReconectar(remoto) {
+  if (avisandoConflicto) return;
+  avisandoConflicto = true;
+  window.pedirEleccion(
+    "Otra persona guardó cambios en este proyecto mientras estabas sin conexión. No se puede combinar automáticamente. Elegí cómo seguir.",
+    [
+      { label: "Traer esos cambios (descarta lo mío)", act: "traer", clase: "danger" },
+      { label: "Guardar lo mío como copia aparte", act: "copia", clase: "primary" },
+    ],
+    async (eleccion) => {
+      avisandoConflicto = false;
+      await resolverConflictoSync(eleccion, remoto.version);
+    },
+    true
+  );
+}
+
 // Se dispara cuando fsSubirCambios detecta que otro dispositivo ya subió
 // una versión distinta a la que este dispositivo tenía como base — pasa
 // típicamente cuando dos personas editaron el mismo proyecto sin señal al
@@ -362,7 +436,7 @@ let avisandoConflicto = false;
 function avisarConflictoSync(versionRemota) {
   if (avisandoConflicto) return; // no apilar el mismo aviso varias veces
   avisandoConflicto = true;
-  pedirEleccion(
+  window.pedirEleccion(
     "Este proyecto cambió en otro dispositivo mientras este estaba sin conexión (o editando al mismo tiempo). ¿Qué querés hacer?",
     [
       { label: "Traer la versión más nueva (descarta tus cambios locales)", act: "traer", clase: "danger" },
@@ -371,56 +445,66 @@ function avisarConflictoSync(versionRemota) {
     ],
     async (eleccion) => {
       avisandoConflicto = false;
-      if (eleccion === "traer") {
-        try {
-          const remoto = await window.fsDescargarUltimaVersion(PROYECTO_ACTIVO_ID);
-          if (!remoto) { mostrarToast("No se pudo traer la versión remota.", "error"); return; }
-          let jsonConImagenes = remoto.payloadJson;
-          if (remoto.imagenesUrls && Object.keys(remoto.imagenesUrls).length > 0 && window.fsDescargarImagenesComoJson) {
-            try {
-              const imagenesJson = await window.fsDescargarImagenesComoJson(remoto.imagenesUrls);
-              jsonConImagenes = reinsertarImagenesGrandes(remoto.payloadJson, imagenesJson);
-            } catch (e2) {
-              console.error("No se pudieron bajar las fotos de la versión remota (se trae el resto igual):", e2);
-            }
-          }
-          const data = JSON.parse(jsonConImagenes);
-          pushUndo();
-          cargarProyectoEnApp(data);
-          PROYECTO_ACTIVO_FS_VERSION = remoto.version;
-          marcarCambio(); // guarda esta versión traída también en IndexedDB local
-          mostrarToast("Se trajo la versión más nueva del proyecto.");
-        } catch (e) {
-          mostrarToast("No se pudo traer la versión remota: " + e.message, "error");
-        }
-      } else if (eleccion === "copia") {
-        const nuevoId = "p_" + Date.now().toString(36) + "_conflicto";
-        const payload = datosProyectoActual();
-        payload.id = nuevoId;
-        payload.guardadoEn = new Date().toISOString();
-        payload.creadoEn = payload.guardadoEn;
-        payload.projectInfo = Object.assign({}, payload.projectInfo, {
-          nombre: (payload.projectInfo.nombre || "Proyecto") + " (copia local sin sincronizar)",
-        });
-        try {
-          await idbGuardarProyecto(nuevoId, payload);
-          mostrarToast("Tu versión se guardó aparte como '" + payload.projectInfo.nombre + "'. Revisala en Proyectos y decidí cuál usar.");
-          // No se toca PROYECTO_ACTIVO_FS_VERSION: el proyecto activo sigue
-          // intentando sincronizar normal en el próximo cambio, contra la
-          // versión remota actual.
-          try {
-            const remoto = await window.fsDescargarUltimaVersion(PROYECTO_ACTIVO_ID);
-            if (remoto) PROYECTO_ACTIVO_FS_VERSION = remoto.version;
-          } catch (e2) {}
-        } catch (e) {
-          mostrarToast("No se pudo guardar la copia: " + e.message, "error");
-        }
-      }
+      await resolverConflictoSync(eleccion, versionRemota);
       // "cancelar": no hace nada — el próximo intento de sync va a volver
       // a chocar y avisar de nuevo, lo cual es intencional (no se pierde
       // el aviso silenciosamente).
     }
   );
+}
+
+// Lógica compartida entre avisarConflictoSync (choca al GUARDAR) y
+// avisarConflictoAlReconectar (choca al RECONECTAR, ver más arriba) — las
+// ramas "traer" y "copia" son idénticas en ambos casos, solo cambia cuántas
+// opciones se ofrecen y si se puede posponer la decisión.
+async function resolverConflictoSync(eleccion, versionRemota) {
+  if (eleccion === "traer") {
+    try {
+      const remoto = await window.fsDescargarUltimaVersion(PROYECTO_ACTIVO_ID);
+      if (!remoto) { mostrarToast("No se pudo traer la versión remota.", "error"); return; }
+      let jsonConImagenes = remoto.payloadJson;
+      if (remoto.imagenesUrls && Object.keys(remoto.imagenesUrls).length > 0 && window.fsDescargarImagenesComoJson) {
+        try {
+          const imagenesJson = await window.fsDescargarImagenesComoJson(remoto.imagenesUrls);
+          jsonConImagenes = reinsertarImagenesGrandes(remoto.payloadJson, imagenesJson);
+        } catch (e2) {
+          console.error("No se pudieron bajar las fotos de la versión remota (se trae el resto igual):", e2);
+        }
+      }
+      const data = JSON.parse(jsonConImagenes);
+      pushUndo();
+      cargarProyectoEnApp(data);
+      PROYECTO_ACTIVO_FS_VERSION = remoto.version;
+      PROYECTO_ACTIVO_HUBO_EDICION = false; // se acaba de adoptar la versión remota tal cual
+      marcarCambio(); // guarda esta versión traída también en IndexedDB local
+      mostrarToast("Se trajo la versión más nueva del proyecto.");
+    } catch (e) {
+      mostrarToast("No se pudo traer la versión remota: " + e.message, "error");
+    }
+  } else if (eleccion === "copia") {
+    const nuevoId = "p_" + Date.now().toString(36) + "_conflicto";
+    const payload = datosProyectoActual();
+    payload.id = nuevoId;
+    payload.guardadoEn = new Date().toISOString();
+    payload.creadoEn = payload.guardadoEn;
+    payload.projectInfo = Object.assign({}, payload.projectInfo, {
+      nombre: (payload.projectInfo.nombre || "Proyecto") + " (copia local sin sincronizar)",
+    });
+    try {
+      await idbGuardarProyecto(nuevoId, payload);
+      mostrarToast("Tu versión se guardó aparte como '" + payload.projectInfo.nombre + "'. Revisala en Proyectos y decidí cuál usar.");
+      // El proyecto activo (este mismo) adopta la versión remota como
+      // nueva base — ya no tiene ediciones sin confirmar, esas quedaron
+      // a salvo en la copia. Sigue sincronizando normal desde acá.
+      PROYECTO_ACTIVO_HUBO_EDICION = false;
+      try {
+        const remoto = await window.fsDescargarUltimaVersion(PROYECTO_ACTIVO_ID);
+        if (remoto) PROYECTO_ACTIVO_FS_VERSION = remoto.version;
+      } catch (e2) {}
+    } catch (e) {
+      mostrarToast("No se pudo guardar la copia: " + e.message, "error");
+    }
+  }
 }
 
 // Migración desde el localStorage viejo: se corre una sola vez, la primera vez
@@ -522,6 +606,7 @@ async function abrirProyectoExistente(id) {
   if (!data) return false;
   PROYECTO_ACTIVO_ID = id;
   PROYECTO_ACTIVO_CREADO_EN = data.creadoEn || data.guardadoEn || new Date().toISOString();
+  PROYECTO_ACTIVO_HUBO_EDICION = false;
   try { await idbGuardarActivo(id); } catch (e) { /* best-effort: si falla, se reintenta el próximo guardado */ }
   cargarProyectoEnApp(data);
   UNDO_STACK.length = 0;
@@ -562,26 +647,43 @@ async function detectarSiEsCompartido(id) {
 }
 
 // Intenta tomar el candado de edición del proyecto compartido que se acaba
-// de abrir. Si alguien más lo tiene (y no venció), se avisa una sola vez y
-// se sigue en modo local normal — NO se bloquea la UI de edición: es más
-// simple y más seguro dejar que la persona siga trabajando localmente
-// (nunca se pierde nada) que meterse a deshabilitar botones de módulos
-// distintos. Lo que sí cambia es que fsSubirCambios va a fallar (rechazado
-// por las reglas de Firestore) hasta que el otro suelte el candado.
+// Intenta tomar el candado de edición del proyecto compartido que se acaba
+// de abrir. Si alguien más lo tiene (y no venció), el proyecto se abre en
+// modo SOLO LECTURA — decisión de Kevin: bloquear a nivel de puerta (esta
+// función) es mucho menos invasivo que deshabilitar módulo por módulo, y
+// evita el caso real que motivó el cambio: dos personas pisándose filas al
+// mismo tiempo. La única excepción es offline (ver marcarCambio/fsSubirCambios
+// más abajo): sin red no hay candado que consultar, así que se edita local
+// y cualquier choque se resuelve al reconectar con el modal de conflicto.
 async function tomarCandadoSiCorresponde(id) {
-  if (!window.fsTomarCandado) return;
+  if (!window.fsTomarCandado) { aplicarModoSoloLectura(false); return; }
   const user = window.usuarioActual ? window.usuarioActual() : null;
-  if (!user) return;
+  if (!user) { aplicarModoSoloLectura(false); return; }
   try {
     const resultado = await window.fsTomarCandado(id, user.uid, user.displayName || user.email || "");
     if (PROYECTO_ACTIVO_ID !== id) return; // se cambió de proyecto mientras tanto
     PROYECTO_ACTIVO_CANDADO_PROPIO = !!resultado.ok;
-    if (!resultado.ok && window.mostrarToast) {
-      mostrarToast(`Solo lectura por ahora: ${resultado.ocupadoPor || "otra persona"} está editando este proyecto. Podés seguir viendo/anotando localmente; se sincroniza cuando quede libre.`);
-    }
+    aplicarModoSoloLectura(!resultado.ok, resultado.ocupadoPor);
   } catch (e) {
-    // Sin señal u otro error — se sigue en modo local, sin candado propio.
+    // Sin señal u otro error — se sigue en modo local editable, sin candado
+    // propio (offline: nadie puede decir que el candado esté ocupado).
     PROYECTO_ACTIVO_CANDADO_PROPIO = false;
+    aplicarModoSoloLectura(false);
+  }
+}
+
+// Prende/apaga el modo solo lectura a nivel de puerta: una clase en <main>
+// bloquea pointer-events de todos los controles reales (ver styles.css),
+// más el banner visible arriba. No toca ningún módulo individualmente.
+function aplicarModoSoloLectura(activo, ocupadoPor) {
+  PROYECTO_ACTIVO_SOLO_LECTURA = !!activo;
+  const main = document.querySelector("main");
+  const banner = document.getElementById("solo-lectura-banner");
+  const texto = document.getElementById("solo-lectura-texto");
+  if (main) main.classList.toggle("solo-lectura", PROYECTO_ACTIVO_SOLO_LECTURA);
+  if (banner) banner.style.display = PROYECTO_ACTIVO_SOLO_LECTURA ? "flex" : "none";
+  if (texto && PROYECTO_ACTIVO_SOLO_LECTURA) {
+    texto.textContent = `Solo lectura — ${ocupadoPor || "otra persona"} está editando`;
   }
 }
 
@@ -590,6 +692,7 @@ async function tomarCandadoSiCorresponde(id) {
 // a Proyectos) para no dejarlo tomado "de olvido" mientras el timeout de 5
 // minutos expira solo.
 async function soltarCandadoActivoSiHaceFalta() {
+  aplicarModoSoloLectura(false); // el proyecto que se deja atrás nunca queda en solo lectura "pegado"
   if (!PROYECTO_ACTIVO_COMPARTIDO || !PROYECTO_ACTIVO_CANDADO_PROPIO || !PROYECTO_ACTIVO_ID) {
     PROYECTO_ACTIVO_CANDADO_PROPIO = false;
     return;
@@ -618,6 +721,7 @@ async function crearYAbrirProyectoNuevo() {
   PROYECTO_ACTIVO_CREADO_EN = new Date().toISOString();
   PROYECTO_ACTIVO_COMPARTIDO = false; // un proyecto nuevo nunca nace compartido
   PROYECTO_ACTIVO_FS_VERSION = null;
+  PROYECTO_ACTIVO_HUBO_EDICION = false;
   try { await idbGuardarActivo(id); } catch (e) {}
   ROWS = []; ROWS_J = []; MANUAL_ITEMS = []; PLANOS = []; INFORMES_ACREDITACION = [];
   Object.assign(CONFIG, CONFIG_DEFAULT);
