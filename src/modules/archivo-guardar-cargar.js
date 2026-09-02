@@ -30,6 +30,25 @@ function extraerImagenesGrandes(jsonString) {
       }
     });
   }
+  // Fotos de los Informes de Acreditación. A diferencia de las filas (donde
+  // cada foto es un string dataUrl suelto), acá cada foto es un objeto
+  // { id, dataUrl, descripcion, seleccionada } y solo se reemplaza dataUrl.
+  // Sin esto, un informe de 10-20 fotos (~290 KB cada una en base64) hacía
+  // que el payloadJson pasara el tope de 1 MiB por documento de Firestore y
+  // el sync fallara en silencio con invalid-argument.
+  if (Array.isArray(obj.informes)) {
+    obj.informes.forEach(inf => {
+      if (inf && Array.isArray(inf.fotos)) {
+        inf.fotos.forEach(foto => {
+          if (foto && typeof foto.dataUrl === "string" && foto.dataUrl) {
+            const key = "img" + (contador++);
+            imagenes[key] = foto.dataUrl;
+            foto.dataUrl = "@@IMG:" + key;
+          }
+        });
+      }
+    });
+  }
   return { jsonSinImagenes: JSON.stringify(obj), imagenesJson: JSON.stringify(imagenes) };
 }
 
@@ -42,6 +61,16 @@ function reinsertarImagenesGrandes(jsonSinImagenes, imagenesJson) {
   }
   if (Array.isArray(obj.planos)) {
     obj.planos.forEach(p => { if (p.dataUrl) p.dataUrl = resolver(p.dataUrl); });
+  }
+  // Simétrico a extraerImagenesGrandes. Retrocompatible: un .fss viejo (o un
+  // payload de Firestore anterior a este cambio) trae el dataUrl completo sin
+  // el prefijo @@IMG:, y resolver() lo devuelve tal cual.
+  if (Array.isArray(obj.informes)) {
+    obj.informes.forEach(inf => {
+      if (inf && Array.isArray(inf.fotos)) {
+        inf.fotos.forEach(foto => { if (foto && foto.dataUrl) foto.dataUrl = resolver(foto.dataUrl); });
+      }
+    });
   }
   return JSON.stringify(obj);
 }

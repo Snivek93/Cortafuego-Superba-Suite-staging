@@ -303,6 +303,7 @@ let firestoreSyncTimer = null;
 let firestoreSyncEnCurso = false;
 let firestoreSyncPendiente = false;
 let avisandoSoloLectura = false;
+let avisandoTamano = false;
 async function sincronizarConFirestoreAhora() {
   if (firestoreSyncEnCurso) { firestoreSyncPendiente = true; return; }
   if (!PROYECTO_ACTIVO_COMPARTIDO || !PROYECTO_ACTIVO_ID) return;
@@ -328,6 +329,21 @@ async function sincronizarConFirestoreAhora() {
         console.error("No se pudieron subir las fotos a Storage (se reintenta después):", e);
       }
     }
+    // Firestore rechaza cualquier documento de más de 1 MiB. Antes de gastar
+    // una transacción de red se mide el payload: si no cabe, se avisa claro
+    // en vez de dejar que muera como un "invalid-argument" que el catch de
+    // abajo confundiría con un corte de señal. El margen (900 KB) deja lugar
+    // para los demás campos del documento (imagenesUrls, metadatos).
+    const tamPayload = new Blob([jsonSinImagenes]).size;
+    if (tamPayload > 900 * 1024) {
+      if (!avisandoTamano) {
+        avisandoTamano = true;
+        if (window.mostrarToast) mostrarToast("El proyecto quedó muy grande para sincronizarlo a la nube (" + Math.round(tamPayload / 1024) + " KB de texto). Se sigue guardando local, pero no se sube. Avisá para revisarlo.", "error");
+      }
+      console.error("Payload demasiado grande para Firestore:", tamPayload, "bytes");
+      return;
+    }
+    avisandoTamano = false;
     const resultado = await window.fsSubirCambios(PROYECTO_ACTIVO_ID, jsonSinImagenes, PROYECTO_ACTIVO_FS_VERSION, imagenesUrls);
     if (resultado.ok) {
       PROYECTO_ACTIVO_FS_VERSION = resultado.version;
@@ -349,6 +365,16 @@ async function sincronizarConFirestoreAhora() {
         avisandoSoloLectura = true;
         if (window.mostrarToast) mostrarToast("Tus cambios se están guardando localmente, pero no se suben a la nube todavía porque otra persona tiene el proyecto en edición.", "error");
       }
+    } else if (e && (e.code === "invalid-argument" || e.code === "resource-exhausted")) {
+      // NO es un corte de red: Firestore rechazó el documento (tamaño, campo
+      // inválido, cuota). Antes esto caía en la rama de abajo y quedaba
+      // disfrazado de "sin señal" — así se perdió el sync de un proyecto
+      // entero sin que nadie se enterara. Ahora se avisa de verdad.
+      if (!avisandoTamano) {
+        avisandoTamano = true;
+        if (window.mostrarToast) mostrarToast("La nube rechazó este proyecto (" + e.code + "). Se sigue guardando local, pero no se sube. Avisá para revisarlo.", "error");
+      }
+      console.error("Firestore rechazó la escritura (no es falta de señal):", e);
     } else {
       // Sin señal es el caso esperado y frecuente (obra) — no se trata como
       // fallo del autoguardado local, que ya terminó bien. Se reintenta solo
