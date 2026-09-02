@@ -304,6 +304,10 @@ let firestoreSyncEnCurso = false;
 let firestoreSyncPendiente = false;
 let avisandoSoloLectura = false;
 let avisandoTamano = false;
+let avisandoFotoFallida = false;
+let reintentoFotosTimer = null;
+let reintentoFotosIntentos = 0;
+const REINTENTO_FOTOS_MAX = 6; // ~6 intentos espaciados — después se rinde en silencio hasta el próximo cambio real o reconexión, ya se avisó una vez
 async function sincronizarConFirestoreAhora() {
   if (firestoreSyncEnCurso) { firestoreSyncPendiente = true; return; }
   if (!PROYECTO_ACTIVO_COMPARTIDO || !PROYECTO_ACTIVO_ID) return;
@@ -319,13 +323,16 @@ async function sincronizarConFirestoreAhora() {
     const payload = datosProyectoActual();
     const { jsonSinImagenes, imagenesJson } = extraerImagenesGrandes(JSON.stringify(payload));
     let imagenesUrls = null;
+    let fotosFallaron = false;
     if (window.fsSubirImagenesFaltantes) {
       try {
-        imagenesUrls = await window.fsSubirImagenesFaltantes(PROYECTO_ACTIVO_ID, imagenesJson);
+        const resultadoFotos = await window.fsSubirImagenesFaltantes(PROYECTO_ACTIVO_ID, imagenesJson);
+        imagenesUrls = resultadoFotos.urls;
+        fotosFallaron = !!resultadoFotos.algunaFallo;
       } catch (e) {
         // Si falla la subida de fotos (red, cuota) no se bloquea el sync del
-        // texto — las filas/config son lo más importante y lo más chico. Las
-        // fotos se reintentan solas en el próximo autoguardado.
+        // texto — las filas/config son lo más importante y lo más chico.
+        fotosFallaron = true;
         console.error("No se pudieron subir las fotos a Storage (se reintenta después):", e);
       }
     }
@@ -350,6 +357,24 @@ async function sincronizarConFirestoreAhora() {
       PROYECTO_ACTIVO_HUBO_EDICION = false; // ya está confirmado contra Firestore
       avisandoSoloLectura = false; // ya se pudo guardar — si había aviso pendiente, ya no aplica
       try { await idbGuardarMetaClave(claveVersionLocal(PROYECTO_ACTIVO_ID), resultado.version); } catch (e2) {}
+      // El texto ya quedó bien en Firestore. Si alguna foto no pudo subir,
+      // eso NO afecta la versión (fotos y texto son independientes) — así
+      // que un choque de versión normal nunca la va a reintentar sola.
+      // Antes de este cambio, una foto que fallaba una vez quedaba en
+      // blanco para siempre y nadie se enteraba (ver bug real esta sesión:
+      // informe con foto que no cargaba). Ahora se avisa una vez y se
+      // reintenta con espera creciente mientras el proyecto siga abierto.
+      if (fotosFallaron) {
+        if (!avisandoFotoFallida) {
+          avisandoFotoFallida = true;
+          if (window.mostrarToast) mostrarToast("Una o más fotos no se pudieron subir a la nube todavía (señal floja). Se sigue intentando solo.", "error");
+        }
+        programarReintentoFotos();
+      } else {
+        avisandoFotoFallida = false;
+        reintentoFotosIntentos = 0;
+        if (reintentoFotosTimer) { clearTimeout(reintentoFotosTimer); reintentoFotosTimer = null; }
+      }
       return;
     }
     if (resultado.conflicto) {
@@ -390,6 +415,25 @@ async function sincronizarConFirestoreAhora() {
 function sincronizarConFirestore() {
   if (firestoreSyncTimer) clearTimeout(firestoreSyncTimer);
   firestoreSyncTimer = setTimeout(sincronizarConFirestoreAhora, 3000);
+}
+
+// Reintento de fotos que no subieron. Espera creciente (15s, 30s, 45s...)
+// para no golpear la red en loop si la señal sigue mala; se rinde en
+// silencio después de REINTENTO_FOTOS_MAX intentos (ya se avisó una vez con
+// el toast) — un cambio real posterior (marcarCambio) o volver a abrir el
+// proyecto lo van a reintentar de nuevo desde cero igual.
+function programarReintentoFotos() {
+  if (reintentoFotosTimer) return; // ya hay uno programado
+  if (reintentoFotosIntentos >= REINTENTO_FOTOS_MAX) return;
+  const idAlProgramar = PROYECTO_ACTIVO_ID;
+  const espera = 15000 * (reintentoFotosIntentos + 1);
+  reintentoFotosTimer = setTimeout(() => {
+    reintentoFotosTimer = null;
+    reintentoFotosIntentos++;
+    if (PROYECTO_ACTIVO_ID === idAlProgramar && PROYECTO_ACTIVO_COMPARTIDO) {
+      sincronizarConFirestoreAhora();
+    }
+  }, espera);
 }
 
 // ---------------------------------------------------------------------------
@@ -801,6 +845,11 @@ function aplicarModoSoloLectura(activo, ocupadoPor) {
 // minutos expira solo.
 async function soltarCandadoActivoSiHaceFalta() {
   aplicarModoSoloLectura(false); // el proyecto que se deja atrás nunca queda en solo lectura "pegado"
+  // El reintento de fotos es por proyecto — si se cambia de proyecto, el
+  // que se deja atrás no debe seguir reintentando en segundo plano.
+  if (reintentoFotosTimer) { clearTimeout(reintentoFotosTimer); reintentoFotosTimer = null; }
+  reintentoFotosIntentos = 0;
+  avisandoFotoFallida = false;
   if (!PROYECTO_ACTIVO_COMPARTIDO || !PROYECTO_ACTIVO_CANDADO_PROPIO || !PROYECTO_ACTIVO_ID) {
     PROYECTO_ACTIVO_CANDADO_PROPIO = false;
     return;

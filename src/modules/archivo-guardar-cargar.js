@@ -36,12 +36,22 @@ function extraerImagenesGrandes(jsonString) {
   // Sin esto, un informe de 10-20 fotos (~290 KB cada una en base64) hacía
   // que el payloadJson pasara el tope de 1 MiB por documento de Firestore y
   // el sync fallara en silencio con invalid-argument.
+  //
+  // Clave ESTABLE (informe.id + foto.id), no posicional como filas/planos:
+  // cada foto ya trae un id propio único (se genera al agregarla, nunca
+  // cambia). Con clave posicional, agregar/borrar una foto en OTRO lado del
+  // proyecto corría la numeración de todas las fotos de informes en la
+  // siguiente subida, lo que rompía la caché de fsSubirImagenesFaltantes
+  // (comparaba por clave, no por contenido) y hacía reintentos/subidas
+  // parciales menos confiables. filas/planos no tienen id propio por foto
+  // todavía, así que se dejan con la numeración de siempre — no tocar sin
+  // agregarles id primero.
   if (Array.isArray(obj.informes)) {
     obj.informes.forEach(inf => {
       if (inf && Array.isArray(inf.fotos)) {
         inf.fotos.forEach(foto => {
-          if (foto && typeof foto.dataUrl === "string" && foto.dataUrl) {
-            const key = "img" + (contador++);
+          if (foto && typeof foto.dataUrl === "string" && foto.dataUrl && !foto.dataUrl.startsWith("@@IMG:")) {
+            const key = "imgInf" + (inf.id != null ? inf.id : "x") + "_" + String(foto.id).replace(/[^a-zA-Z0-9]/g, "");
             imagenes[key] = foto.dataUrl;
             foto.dataUrl = "@@IMG:" + key;
           }
