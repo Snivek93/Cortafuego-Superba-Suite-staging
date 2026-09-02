@@ -528,6 +528,12 @@ async function renderPantallaProyectos(permitirCerrar) {
           data.guardadoEn = data.guardadoEn || new Date().toISOString();
           data.creadoEn = data.creadoEn || data.guardadoEn;
           await window.idbGuardarProyecto(remoto.id, data);
+          // Deja anotada la versión con la que quedó esta copia — evita
+          // que detectarSiEsCompartido la vuelva a bajar de una al abrirla
+          // por primera vez (ver claveVersionLocal en archivo-estado-app.js).
+          if (window.idbGuardarMetaClave) {
+            try { await window.idbGuardarMetaClave("fsVersionLocal:" + remoto.id, remoto.version); } catch (e3) {}
+          }
           lista.push({ id: remoto.id, data });
         } catch (e) {
           console.error("No se pudo traer el proyecto compartido", remoto.id, e);

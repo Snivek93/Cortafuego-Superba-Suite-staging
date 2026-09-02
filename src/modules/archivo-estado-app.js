@@ -349,6 +349,7 @@ async function sincronizarConFirestoreAhora() {
       PROYECTO_ACTIVO_FS_VERSION = resultado.version;
       PROYECTO_ACTIVO_HUBO_EDICION = false; // ya está confirmado contra Firestore
       avisandoSoloLectura = false; // ya se pudo guardar — si había aviso pendiente, ya no aplica
+      try { await idbGuardarMetaClave(claveVersionLocal(PROYECTO_ACTIVO_ID), resultado.version); } catch (e2) {}
       return;
     }
     if (resultado.conflicto) {
@@ -413,11 +414,17 @@ async function manejarReconexion() {
       PROYECTO_ACTIVO_FS_VERSION === null || remoto.version !== PROYECTO_ACTIVO_FS_VERSION;
     if (PROYECTO_ACTIVO_HUBO_EDICION && versionDesconocidaOAtrasada) {
       avisarConflictoAlReconectar(remoto);
+    } else if (versionDesconocidaOAtrasada) {
+      // Sin ediciones propias, pero la versión remota cambió igual —
+      // alguien más subió algo mientras este dispositivo estaba sin señal.
+      // Antes esto solo actualizaba PROYECTO_ACTIVO_FS_VERSION sin bajar el
+      // contenido, así que lo nuevo de otra persona no se veía hasta
+      // reabrir el proyecto de cero (y mientras tanto, cualquier guardado
+      // de este dispositivo pisaba la nube en silencio).
+      const ok = await traerVersionRemotaYAdoptar(idAlEmpezar, remoto);
+      if (!ok) PROYECTO_ACTIVO_FS_VERSION = remoto.version;
+      await tomarCandadoSiCorresponde(idAlEmpezar);
     } else {
-      // Sin ediciones locales sin confirmar (o ya estábamos al día): no hay
-      // nada que perder, se adopta la versión remota como referencia sin
-      // interrumpir a nadie, y recién ahí se revisa el candado real.
-      PROYECTO_ACTIVO_FS_VERSION = remoto.version;
       await tomarCandadoSiCorresponde(idAlEmpezar);
     }
   } catch (e) {
@@ -502,6 +509,7 @@ async function resolverConflictoSync(eleccion, versionRemota) {
       cargarProyectoEnApp(data);
       PROYECTO_ACTIVO_FS_VERSION = remoto.version;
       PROYECTO_ACTIVO_HUBO_EDICION = false; // se acaba de adoptar la versión remota tal cual
+      try { await idbGuardarMetaClave(claveVersionLocal(PROYECTO_ACTIVO_ID), remoto.version); } catch (e2) {}
       marcarCambio(); // guarda esta versión traída también en IndexedDB local
       mostrarToast("Se trajo la versión más nueva del proyecto.");
     } catch (e) {
@@ -525,7 +533,16 @@ async function resolverConflictoSync(eleccion, versionRemota) {
       PROYECTO_ACTIVO_HUBO_EDICION = false;
       try {
         const remoto = await window.fsDescargarUltimaVersion(PROYECTO_ACTIVO_ID);
-        if (remoto) PROYECTO_ACTIVO_FS_VERSION = remoto.version;
+        if (remoto) {
+          // Antes esto solo actualizaba PROYECTO_ACTIVO_FS_VERSION sin
+          // tocar los datos en pantalla ni en IndexedDB del proyecto
+          // original — la sesión seguía mostrando (y podía volver a subir)
+          // la versión vieja en conflicto, aunque "copia" ya la había
+          // puesto a salvo aparte. Un guardado posterior pisaba la nube en
+          // silencio con datos que el usuario ya había decidido descartar.
+          const ok = await traerVersionRemotaYAdoptar(PROYECTO_ACTIVO_ID, remoto);
+          if (!ok) PROYECTO_ACTIVO_FS_VERSION = remoto.version;
+        }
       } catch (e2) {}
     } catch (e) {
       mostrarToast("No se pudo guardar la copia: " + e.message, "error");
@@ -650,6 +667,53 @@ async function abrirProyectoExistente(id) {
 // simplemente se trata como no-compartido para esta sesión (autoguardado
 // local normal, sin intentos de sync) — es el comportamiento correcto: sin
 // red no hay con qué sincronizar de todas formas.
+// Fase 3 — versión de Firestore que corresponde a la copia LOCAL de cada
+// proyecto compartido, persistida en el store 'meta' (clave por proyecto).
+// PROYECTO_ACTIVO_FS_VERSION es en memoria y se resetea a null cada vez que
+// se abre la app — sin esto no hay forma de saber, al reabrir en una sesión
+// nueva, si lo que hay en IndexedDB ya está al día con Firestore o quedó
+// atrasado porque alguien más subió algo mientras tanto.
+function claveVersionLocal(id) { return "fsVersionLocal:" + id; }
+
+// Baja el contenido real (con fotos) de la última versión remota y lo
+// adopta como la copia local del proyecto — a diferencia de simplemente
+// actualizar PROYECTO_ACTIVO_FS_VERSION, esto sí trae los datos. Se usa en
+// tres lugares que antes solo tocaban el número de versión sin bajar nada
+// (ver historial de esta sesión): abrir un proyecto atrasado, reconectar
+// sin ediciones propias, y la rama "copia" de un conflicto. NO pasa por
+// marcarCambio(): no hay nada que "editar" ni volver a subir, solo
+// ponerse al día con lo que ya está en la nube.
+async function traerVersionRemotaYAdoptar(id, remoto) {
+  if (!remoto.payloadJson) return false; // el dueño todavía no guardó nada sincronizable
+  try {
+    let jsonConImagenes = remoto.payloadJson;
+    if (remoto.imagenesUrls && Object.keys(remoto.imagenesUrls).length > 0 && window.fsDescargarImagenesComoJson) {
+      try {
+        const imagenesJson = await window.fsDescargarImagenesComoJson(remoto.imagenesUrls);
+        jsonConImagenes = reinsertarImagenesGrandes(remoto.payloadJson, imagenesJson);
+      } catch (e2) {
+        console.error("No se pudieron bajar las fotos de la versión remota (se adopta el resto igual):", e2);
+      }
+    }
+    const data = JSON.parse(jsonConImagenes);
+    data.id = id;
+    data.guardadoEn = data.guardadoEn || new Date().toISOString();
+    data.creadoEn = data.creadoEn || data.guardadoEn;
+    await idbGuardarProyecto(id, data);
+    try { await idbGuardarMetaClave(claveVersionLocal(id), remoto.version); } catch (e2) {}
+    if (PROYECTO_ACTIVO_ID === id) {
+      cargarProyectoEnApp(data);
+      PROYECTO_ACTIVO_FS_VERSION = remoto.version;
+      ULTIMO_GUARDADO = new Date();
+      actualizarIndicadorArchivo();
+    }
+    return true;
+  } catch (e) {
+    console.error("No se pudo traer la versión remota:", e);
+    return false;
+  }
+}
+
 async function detectarSiEsCompartido(id) {
   PROYECTO_ACTIVO_COMPARTIDO = false;
   PROYECTO_ACTIVO_FS_VERSION = null;
@@ -662,7 +726,25 @@ async function detectarSiEsCompartido(id) {
     if (PROYECTO_ACTIVO_ID !== id) return;
     if (remoto) {
       PROYECTO_ACTIVO_COMPARTIDO = true;
-      PROYECTO_ACTIVO_FS_VERSION = remoto.version;
+      let versionLocalConocida = null;
+      try { versionLocalConocida = await idbLeerMetaClave(claveVersionLocal(id)); } catch (e2) {}
+      if (versionLocalConocida === null || versionLocalConocida !== remoto.version) {
+        // Esta copia local nunca se sincronizó desde este dispositivo, o
+        // quedó atrasada respecto a lo último que subió alguien más. Recién
+        // se abrió el proyecto (PROYECTO_ACTIVO_HUBO_EDICION siempre es
+        // false acá, ver abrirProyectoExistente) así que no hay nada local
+        // que perder: se trae la versión remota antes de tomar el candado.
+        // ANTES de este cambio, un dispositivo que ya tenía el proyecto
+        // guardado localmente jamás volvía a bajar cambios ajenos al
+        // abrirlo — solo se detectaba un conflicto si ESTE dispositivo
+        // intentaba guardar algo, lo cual nunca pasaba si nadie tocaba
+        // nada. Así se quedó sin ver un informe nuevo indefinidamente.
+        const ok = await traerVersionRemotaYAdoptar(id, remoto);
+        if (!ok) PROYECTO_ACTIVO_FS_VERSION = remoto.version;
+      } else {
+        PROYECTO_ACTIVO_FS_VERSION = remoto.version;
+      }
+      if (PROYECTO_ACTIVO_ID !== id) return; // se cambió de proyecto mientras se bajaba
       await tomarCandadoSiCorresponde(id);
     }
   } catch (e) {
