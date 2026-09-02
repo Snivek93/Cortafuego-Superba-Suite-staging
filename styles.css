@@ -878,6 +878,8 @@ button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
 .proy-card-nombre { font-size: var(--fs-md); font-weight: 600; color: var(--ink); margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .proy-card-borrador .proy-card-nombre { color: var(--text-secondary); font-weight: 500; }
 .proy-card-sub { font-size: var(--fs-sm); color: var(--text-muted); margin: 3px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proy-card-candado { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-xs); color: var(--warn); background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: 999px; padding: 2px 9px; margin: 6px 0 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proy-card-candado .icon { width: 13px; height: 13px; flex-shrink: 0; }
 .proy-card-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .proy-card-chevron { width: 17px; height: 17px; color: var(--text-muted); margin-right: 0; }
 .proy-card-borrar { flex-shrink: 0; background: transparent; border: none; color: var(--text-muted); padding: 6px; border-radius: var(--radius-sm); cursor: pointer; display: flex; }
