@@ -143,6 +143,23 @@ async function fsListarProyectosCompartidosConmigo(uid) {
   return q.docs.map((d) => Object.assign({ id: d.id }, d.data()));
 }
 
+// Proyectos donde el usuario actual es el DUEÑO. Como fsAsegurarProyecto solo
+// se llama al compartir, el documento en Firestore existe únicamente para los
+// proyectos que ya se compartieron con alguien — así que esto devuelve
+// exactamente "mis proyectos compartidos", sin traer los privados.
+//
+// Hace falta aparte de fsListarProyectosCompartidosConmigo porque el owner NO
+// está en editoresUids (fsAsegurarProyecto lo crea vacío), y sin esto el dueño
+// nunca vería el candado de la persona a la que le compartió el proyecto —
+// que es justo el caso de uso principal del badge.
+//
+// NO materializa nada en IndexedDB: estos proyectos ya son locales por
+// definición (los creó este usuario). Solo se usa para leer metadata remota.
+async function fsListarMisProyectosCompartidos(uid) {
+  const q = await db().collection("proyectos").where("ownerId", "==", uid).get();
+  return q.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+}
+
 // ---------------------------------------------------------------------------
 // Candado de edición
 // ---------------------------------------------------------------------------
@@ -251,6 +268,7 @@ window.fsCompartirProyecto = fsCompartirProyecto;
 window.fsResolverInvitacionesPendientes = fsResolverInvitacionesPendientes;
 window.fsQuitarAcceso = fsQuitarAcceso;
 window.fsListarProyectosCompartidosConmigo = fsListarProyectosCompartidosConmigo;
+window.fsListarMisProyectosCompartidos = fsListarMisProyectosCompartidos;
 window.fsTomarCandado = fsTomarCandado;
 window.fsSoltarCandado = fsSoltarCandado;
 window.fsEscucharCandado = fsEscucharCandado;

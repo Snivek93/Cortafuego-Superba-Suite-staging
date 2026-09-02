@@ -90,7 +90,10 @@ function ordenarCarpetas(lista, modo) {
 // ---------------------------------------------------------------------------
 // HTML de tarjetas
 // ---------------------------------------------------------------------------
-function tarjetaProyectoHTML(id, data, esBorrador, modoManual, esCompartido) {
+// candadoAjeno: nombre de la persona que tiene el proyecto tomado ahora mismo,
+// o "" / null si está libre, vencido, o si el candado es propio. Se calcula en
+// renderPantallaProyectos (ver candadosAjenosPorProyecto) — acá solo se pinta.
+function tarjetaProyectoHTML(id, data, esBorrador, modoManual, esCompartido, candadoAjeno) {
   const nombre = esBorrador
     ? (formatearFechaCorta(data.creadoEn || data.guardadoEn) || "Borrador")
     : ((data.projectInfo && data.projectInfo.nombre) || "Sin nombre");
@@ -109,6 +112,7 @@ function tarjetaProyectoHTML(id, data, esBorrador, modoManual, esCompartido) {
       <div class="proy-card-info">
         <p class="proy-card-nombre">${escapeHtml(nombre)}${esCompartido ? `<span class="badge-manual">Compartido</span>` : ""}</p>
         <p class="proy-card-sub">${escapeHtml(sub)}</p>
+        ${candadoAjeno ? `<p class="proy-card-candado"><svg class="icon"><use href="#i-lock"/></svg>${escapeHtml(candadoAjeno)} está editando</p>` : ""}
       </div>
       <div class="proy-card-right">
         ${!esBorrador ? `<button type="button" class="proy-card-compartir" data-id="${escapeHtml(id)}" title="Compartir" aria-label="Compartir"><svg class="icon"><use href="#i-share"/></svg></button>` : ""}
@@ -482,13 +486,31 @@ async function renderPantallaProyectos(permitirCerrar) {
   // no perder ediciones locales por encima de lo que hay en Firestore; ese
   // caso ya lo cubre la detección de conflicto al guardar/sincronizar.
   const idsCompartidos = new Set();
+  // Mapa {proyectoId: nombre} de quién tiene tomado cada proyecto AHORA MISMO,
+  // según lo que dijo Firestore en el momento de armar esta pantalla. A
+  // propósito NO se escucha en vivo (nada de fsEscucharCandado por tarjeta):
+  // el dato ya viene incluido en las consultas de abajo sin costo extra, y el
+  // momento que de verdad importa —abrir el proyecto— vuelve a consultar el
+  // candado igual vía fsTomarCandado. El badge es un aviso previo, no la
+  // protección; la protección es el candado mismo.
+  const candadosAjenosPorProyecto = {};
   const user = window.usuarioActual ? window.usuarioActual() : null;
+
+  function registrarCandadoAjeno(doc) {
+    const c = doc && doc.candado;
+    if (!c || !c.uid) return;                         // libre
+    if (user && c.uid === user.uid) return;           // lo tengo yo: no es aviso
+    if (window.candadoEstaVencido && window.candadoEstaVencido(c)) return; // pestaña muerta
+    candadosAjenosPorProyecto[doc.id] = c.nombre || "Otra persona";
+  }
+
   if (user && window.fsListarProyectosCompartidosConmigo) {
     try {
       const remotos = await window.fsListarProyectosCompartidosConmigo(user.uid);
       const idsLocales = new Set(lista.map((p) => p.id));
       for (const remoto of remotos) {
         idsCompartidos.add(remoto.id);
+        registrarCandadoAjeno(remoto);
         if (idsLocales.has(remoto.id)) continue;
         if (!remoto.payloadJson) continue; // el dueño todavía no guardó nada sincronizable
         try {
@@ -514,6 +536,25 @@ async function renderPantallaProyectos(permitirCerrar) {
     } catch (e) {
       // Sin señal, o simplemente nadie te compartió nada — se sigue normal
       // con lo que ya hay localmente.
+    }
+  }
+
+  // Mis propios proyectos que YO compartí con alguien: el owner no está en
+  // editoresUids, así que la consulta de arriba no los trae. Bloque aparte y
+  // con su propio try para que una falla acá no tumbe la lista de compartidos
+  // conmigo (ni al revés). Estos ya están en IndexedDB — solo se lee el
+  // candado, no se materializa nada.
+  if (user && window.fsListarMisProyectosCompartidos) {
+    try {
+      const mios = await window.fsListarMisProyectosCompartidos(user.uid);
+      // Ojo: NO se agregan a idsCompartidos. El badge "Compartido" hoy
+      // significa "alguien me compartió esto a mí"; marcarlos acá le
+      // cambiaría el significado a "este proyecto está compartido con
+      // alguien", que es otra cosa y no se pidió. Solo se lee el candado.
+      for (const doc of mios) registrarCandadoAjeno(doc);
+    } catch (e) {
+      // Sin señal o reglas que no permiten la consulta por ownerId: la
+      // pantalla funciona igual, solo sin badge en mis propios proyectos.
     }
   }
 
@@ -559,7 +600,7 @@ async function renderPantallaProyectos(permitirCerrar) {
        ${controlOrden}
        <div class="proy-lista" id="proy-lista-principal">
          ${carpetasOrdenadas.map(c => tarjetaCarpetaHTML(c, conNombre.filter(p => CARPETA_ASIGNACIONES[p.id] === c.id).length)).join("")}
-         ${proyectosOrdenados.map(p => tarjetaProyectoHTML(p.id, p.data, false, modoManual, idsCompartidos.has(p.id))).join("")}
+         ${proyectosOrdenados.map(p => tarjetaProyectoHTML(p.id, p.data, false, modoManual, idsCompartidos.has(p.id), candadosAjenosPorProyecto[p.id])).join("")}
        </div>`
     : "";
   const btnNuevaCarpeta = puedeCrearSubcarpeta
