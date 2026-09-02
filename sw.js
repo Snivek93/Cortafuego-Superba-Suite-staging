@@ -20,7 +20,7 @@
  * (se agrega o se saca un archivo de ARCHIVOS_PRECACHE) — no por ediciones
  * normales de contenido.
  */
-const CACHE_VERSION = "v1.0.70";
+const CACHE_VERSION = "v1.0.71";
 const CACHE_NAME = `cortafuego-hilti-${CACHE_VERSION}`;
 
 // Con señal mala pero presente (3G intermitente en obra), un fetch() sin

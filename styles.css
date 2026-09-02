@@ -880,6 +880,20 @@ button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
 .proy-card-sub { font-size: var(--fs-sm); color: var(--text-muted); margin: 3px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .proy-card-candado { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-xs); color: var(--warn); background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: 999px; padding: 2px 9px; margin: 6px 0 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .proy-card-candado .icon { width: 13px; height: 13px; flex-shrink: 0; }
+
+.solo-lectura-banner { display: flex; align-items: center; gap: 8px; background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-border); border-radius: var(--radius-sm); padding: 8px 12px; margin: 0 0 12px; font-size: var(--fs-sm); }
+.solo-lectura-banner .icon { width: 16px; height: 16px; flex-shrink: 0; }
+/* main.solo-lectura bloquea TODA la edición a nivel de puerta: ningún módulo
+   (Levantamiento, Planos, Informes) necesita saber de esto por separado.
+   pointer-events:none en los controles reales, pero NO en el banner de
+   arriba (que vive fuera de <main>) ni en la navegación entre pestañas —
+   se puede seguir navegando y viendo, solo no editar. */
+main.solo-lectura input, main.solo-lectura textarea, main.solo-lectura select,
+main.solo-lectura button:not(.tab-btn), main.solo-lectura [contenteditable] {
+  pointer-events: none;
+  opacity: 0.55;
+}
+main.solo-lectura .tab-btn { opacity: 1; pointer-events: auto; }
 .proy-card-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .proy-card-chevron { width: 17px; height: 17px; color: var(--text-muted); margin-right: 0; }
 .proy-card-borrar { flex-shrink: 0; background: transparent; border: none; color: var(--text-muted); padding: 6px; border-radius: var(--radius-sm); cursor: pointer; display: flex; }
