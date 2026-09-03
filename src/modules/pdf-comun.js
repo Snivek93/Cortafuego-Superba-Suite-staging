@@ -125,9 +125,9 @@ function construirReportePDF(opciones) {
 
   // Si el título + la tabla estimada no entran en lo que queda de página,
   // salta a una nueva página ANTES de dibujar nada de esta sección — así
-  // el título y su tabla siempre arrancan juntos. pageBreak:"avoid" en cada
-  // autoTable queda como red de seguridad adicional por si esta estimación
-  // se quedara corta.
+  // el título y su tabla siempre arrancan juntos. Ver asegurarEspacioTabla:
+  // la reserva nunca supera una página, y todas las tablas van con
+  // pageBreak:"auto" para que el motor pagine las filas por su cuenta.
   const alturaTitulo = 22;
   const asegurarEspacio = (alturaEstimadaTabla) => {
     if (y + alturaTitulo + alturaEstimadaTabla > safe.bottom) {
@@ -135,6 +135,21 @@ function construirReportePDF(opciones) {
       dibujarCabeceraPagina();
       y = safe.top;
     }
+  };
+  // Reserva de espacio para una TABLA: nunca más de lo que cabe en una página.
+  // Una tabla más larga que la página (ej. Levantamiento detallado con decenas
+  // de filas) jamás va a entrar entera, así que reservar su alto total hacía
+  // que asegurarEspacio saltara de página, y encima pageBreak:"avoid" volvía a
+  // empujar la tabla a la siguiente — el PDF arrancaba con una o dos hojas en
+  // blanco (bug real reportado por Kevin 03/09/2026). Con el tope de una
+  // página + pageBreak:"auto", el motor pagina las filas solo.
+  const asegurarEspacioTabla = (numFilas) => {
+    const est = alturaTablaAprox(numFilas, 8, 4);
+    const altoUtilPagina = safe.bottom - safe.top - alturaTitulo;
+    // Tabla que cabe en una página: se reserva entera (título y tabla juntos).
+    // Tabla más larga que una página: va a partirse igual, así que solo se
+    // exige que quepan el título y las primeras filas donde estemos.
+    asegurarEspacio(est <= altoUtilPagina ? est : alturaTablaAprox(3, 8, 4));
   };
   const dibujarTituloSeccion = (texto) => {
     doc.setFontSize(11);
@@ -173,12 +188,13 @@ function construirReportePDF(opciones) {
   // si un proyecto no tiene juntas, por ejemplo, no aparece ni el título.
   if (opts.levantamiento) {
     if (computed.length > 0) {
-      asegurarEspacio(alturaTablaAprox(computed.length, 8, 4));
+      asegurarEspacioTabla(computed.length);
       dibujarTituloSeccion("Levantamiento — Penetrantes");
       doc.autoTable({
         startY: y,
         margin: tableMargin,
-        pageBreak: "avoid",
+        pageBreak: "auto",
+        rowPageBreak: "avoid",
         head: [["Zona", "Nivel", "Cant.", "Penetrante", "Dimensión", "Anular", "Barrera", "Producto", "Espesor", "Vueltas Cinta", "F Rating", "Nota"]],
         body: computed.map(r => {
           const esCinta = r.P === MAT_CINTA_CON || r.P === MAT_CINTA_SIN;
@@ -200,12 +216,13 @@ function construirReportePDF(opciones) {
     }
 
     if (computedJ_pdf.length > 0) {
-      asegurarEspacio(alturaTablaAprox(computedJ_pdf.length, 8, 4));
+      asegurarEspacioTabla(computedJ_pdf.length);
       dibujarTituloSeccion("Levantamiento — Juntas");
       doc.autoTable({
         startY: y,
         margin: tableMargin,
-        pageBreak: "avoid",
+        pageBreak: "auto",
+        rowPageBreak: "avoid",
         head: [["Zona", "Nivel", "Cant.", "Junta", "Barreras", "Producto", "Longitud (cm)", "Ancho (cm)", "Espesor", "Nota"]],
         body: computedJ_pdf.map(r => [
               r.A || "-", r.B || "-", String(r.cantidad),
@@ -238,12 +255,13 @@ function construirReportePDF(opciones) {
       // reservara el alto estimado de la tabla completa, la sección entera
       // saltaría a la página siguiente dejando la portada en blanco.
       // pageBreak:"auto" ya se encarga de paginar el resto de las filas solo.
-      asegurarEspacio(alturaTablaAprox(1, 8, 4));
+      asegurarEspacioTabla(1);
       dibujarTituloSeccion("Levantamiento Resumido — Penetrantes");
       doc.autoTable({
         startY: y,
         margin: tableMargin,
         pageBreak: "auto",
+        rowPageBreak: "avoid",
         head: [["Cant. Total", "Penetrante", "Dimensión", "Anular", "Barrera", "Producto"]],
         body: gruposPen.map(({ rep: r, cantidad }) => [
           String(cantidad), TIPO_LABEL_CORTO[r.L] || r.L, dimensionPenetrantePDF(r),
@@ -258,12 +276,13 @@ function construirReportePDF(opciones) {
     }
 
     if (gruposJ.length > 0) {
-      asegurarEspacio(alturaTablaAprox(gruposJ.length, 8, 4));
+      asegurarEspacioTabla(gruposJ.length);
       dibujarTituloSeccion("Levantamiento Resumido — Juntas");
       doc.autoTable({
         startY: y,
         margin: tableMargin,
-        pageBreak: "avoid",
+        pageBreak: "auto",
+        rowPageBreak: "avoid",
         head: [["Junta", "Barreras", "Producto", "Longitud Total (cm)", "Ancho (cm)"]],
         body: gruposJ.map(({ rep: r, longitudTotal }) => {
           const filaSintetica = Object.assign({}, r, { longitud: longitudTotal, cantidad: 1 });
@@ -284,12 +303,13 @@ function construirReportePDF(opciones) {
 
   if (opts.resumen) {
     const itemsConManualesPdf = combinarItemsConManuales(resumen.items);
-    asegurarEspacio(alturaTablaAprox(itemsConManualesPdf.length, 8, 4));
+    asegurarEspacioTabla(itemsConManualesPdf.length);
     dibujarTituloSeccion("Cuantificación de Materiales Hilti");
     doc.autoTable({
       startY: y,
       margin: tableMargin,
-      pageBreak: "avoid",
+      pageBreak: "auto",
+        rowPageBreak: "avoid",
       head: [["Código", "Cantidad", "Producto", "Presentación", "Tipo"]],
       body: itemsConManualesPdf.length
         ? itemsConManualesPdf.map(it => [it.codigo, String(it.cantidad), tituloCaseProducto(it.producto) + (it.manual ? " (manual)" : (Number(it.manualExtra) > 0 ? " (incluye " + it.manualExtra + " manual)" : "")), it.presentacion, tituloCase(it.tipo)])
@@ -301,12 +321,13 @@ function construirReportePDF(opciones) {
     });
     y = doc.lastAutoTable.finalY + espacioEntreTablas;
 
-    asegurarEspacio(alturaTablaAprox(resumen.normativas.length, 8, 4));
+    asegurarEspacioTabla(resumen.normativas.length);
     dibujarTituloSeccion("Normativa Aplicable del Proyecto (Sistemas UL)");
     doc.autoTable({
       startY: y,
       margin: tableMargin,
-      pageBreak: "avoid",
+      pageBreak: "auto",
+        rowPageBreak: "avoid",
       head: [["Aplicación", "Sistema UL", "Producto Hilti", "Zona(s)"]],
       body: resumen.normativas.length
         ? resumen.normativas.map(nrm => [nrm.aplicacion || "-", nrm.norma, nrm.productoHilti, nrm.zonas || "-"])

@@ -2273,7 +2273,26 @@ async function generarPDFInformeAcreditacion(informeId) {
     const marginL = 72, anchoTexto = 468, FS = 10.5, LH = 14.5;
     let safe = window.dibujarLetterheadPDF ? window.dibujarLetterheadPDF(doc, titulo) : { top: 140, bottom: 735 };
     let y = safe.top;
-    function nuevaPagina() { doc.addPage(); safe = window.dibujarLetterheadPDF ? window.dibujarLetterheadPDF(doc, titulo) : { top: 140, bottom: 735 }; y = safe.top; }
+    // dibujarLetterheadPDF pinta el título del membretado y deja el documento
+    // con SU fuente (helvetica normal, tamaño auto-ajustado 8–13 pt según el
+    // largo del título). Si el salto de página cae a mitad de un párrafo, las
+    // líneas que siguen en la página nueva salían con esa fuente en vez de la
+    // del cuerpo: letra distinta, y como el ancho ya venía calculado a 10,5 pt,
+    // el justificado repartía espacios negativos ("sin justificar y muy raro",
+    // reportado por Kevin 03/09/2026). Se guarda y restaura el estado de fuente
+    // alrededor del membretado.
+    function nuevaPagina() {
+      let fPrev = null, sizePrev = null, colorPrev = null;
+      try { fPrev = doc.getFont(); sizePrev = doc.getFontSize(); colorPrev = doc.getTextColor(); } catch (e) {}
+      doc.addPage();
+      safe = window.dibujarLetterheadPDF ? window.dibujarLetterheadPDF(doc, titulo) : { top: 140, bottom: 735 };
+      y = safe.top;
+      try {
+        if (fPrev && fPrev.fontName) doc.setFont(fPrev.fontName, fPrev.fontStyle || "normal");
+        if (sizePrev) doc.setFontSize(sizePrev);
+        if (colorPrev) doc.setTextColor(colorPrev);
+      } catch (e) {}
+    }
     function asegurar(alto) { if (y + alto > safe.bottom) nuevaPagina(); }
     function dibujarLineaJustificada(linea, x, yy, ancho) {
       const palabras = String(linea).split(" ").filter((p) => p.length);
