@@ -1314,7 +1314,17 @@ async function initApp() {
   // 3 ramas de arriba sin repetir la llamada en cada una. Antes de este
   // cambio no había ningún splash: se veía la calculadora vacía un
   // instante antes de que la Pantalla de Proyectos apareciera encima.
-  ocultarSplashInicial();
+  //
+  // 250ms de espera (200ms de la transición CSS de .proy-visible + margen):
+  // si el splash se oculta en el MISMO instante en que la Pantalla de
+  // Proyectos recién empieza su propio fade-in (opacity 0→1 en .2s), queda
+  // casi transparente todavía — se ve la calculadora cruda A TRAVÉS suyo
+  // por esos ~200ms. Bug real reportado por Kevin (03/09/2026): "destello"
+  // que persistía incluso después de arreglar el z-index del login — no
+  // era caché, era esta carrera entre dos transiciones. Con este margen,
+  // el splash se queda tapando hasta que la pantalla de abajo ya está
+  // sólida del todo.
+  setTimeout(ocultarSplashInicial, 250);
 }
 
 function ocultarSplashInicial() {
