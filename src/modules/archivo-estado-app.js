@@ -682,7 +682,13 @@ function cargarProyectoEnApp(data) {
 // tocar nada si el id no existe (ej. el puntero 'activo' quedó apuntando a
 // algo que se borró) — el que llama decide qué hacer en ese caso.
 async function abrirProyectoExistente(id) {
-  await soltarCandadoActivoSiHaceFalta(); // el proyecto que se estaba editando queda libre para otros
+  // Fire-and-forget: soltarCandadoActivoSiHaceFalta ya captura todo lo que
+  // necesita de forma sincrónica (ver su propio código) antes de su único
+  // await de red — no hay ninguna razón real para bloquear la apertura de
+  // ESTE proyecto esperando esa ida y vuelta a Firestore del anterior.
+  // Bug de UX real esta sesión: cada apertura de proyecto se sentía con
+  // demora porque esperaba esto primero.
+  soltarCandadoActivoSiHaceFalta();
   let data = null;
   try {
     data = await idbLeerProyecto(id);
@@ -924,7 +930,7 @@ async function soltarCandadoActivoSiHaceFalta() {
 // nombre, PROJECT_INFO.nombre queda vacío y la Pantalla de Proyectos lo
 // muestra en "Borradores" con la fecha de creación.
 async function crearYAbrirProyectoNuevo() {
-  await soltarCandadoActivoSiHaceFalta();
+  soltarCandadoActivoSiHaceFalta(); // fire-and-forget, ver comentario en abrirProyectoExistente
   const id = "p_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
   PROYECTO_ACTIVO_ID = id;
   PROYECTO_ACTIVO_CREADO_EN = new Date().toISOString();
@@ -1302,6 +1308,18 @@ async function initApp() {
       renderLevantamientoTab();
     }
   }
+  // Recién acá se sabe con certeza qué pantalla corresponde mostrar (la
+  // calculadora con datos embebidos, la Pantalla de Proyectos, o la red de
+  // seguridad) — se destapa el splash una sola vez, al final, cubriendo las
+  // 3 ramas de arriba sin repetir la llamada en cada una. Antes de este
+  // cambio no había ningún splash: se veía la calculadora vacía un
+  // instante antes de que la Pantalla de Proyectos apareciera encima.
+  ocultarSplashInicial();
+}
+
+function ocultarSplashInicial() {
+  const el = document.getElementById("splash-inicio");
+  if (el) el.classList.add("splash-oculto");
 }
 
 document.addEventListener("DOMContentLoaded", initApp);

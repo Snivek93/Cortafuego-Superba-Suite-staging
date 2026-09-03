@@ -784,7 +784,7 @@ async function mostrarPantallaProyectos() {
   // organización el proyecto seguía viéndose "en edición" indefinidamente
   // (hasta el timeout de 5 min). Bug real reportado por Kevin.
   if (window.soltarCandadoActivoSiHaceFalta) {
-    try { await window.soltarCandadoActivoSiHaceFalta(); } catch (e) { /* best-effort */ }
+    window.soltarCandadoActivoSiHaceFalta(); // fire-and-forget — ver comentario en abrirProyectoExistente (archivo-estado-app.js)
   }
   const hayProyectoAbierto = !!window.PROYECTO_ACTIVO_ID;
   await renderPantallaProyectos(hayProyectoAbierto);
