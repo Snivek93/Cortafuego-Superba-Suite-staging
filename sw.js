@@ -20,7 +20,7 @@
  * (se agrega o se saca un archivo de ARCHIVOS_PRECACHE) — no por ediciones
  * normales de contenido.
  */
-const CACHE_VERSION = "v1.0.72";
+const CACHE_VERSION = "v1.0.73";
 const CACHE_NAME = `cortafuego-hilti-${CACHE_VERSION}`;
 
 // Con señal mala pero presente (3G intermitente en obra), un fetch() sin
@@ -103,6 +103,20 @@ function esArchivoDeLaApp(request) {
   return /\.(html|css|js)$/.test(url.pathname);
 }
 
+// vendor/, icons/ y cualquier otro archivo propio (no html/css/js, ya
+// cubierto arriba) — acá sí tiene sentido "caché primero", cambian poco y
+// pesan más. SIEMPRE del mismo origen — nunca debe atrapar pedidos a otro
+// dominio (ej. fotos de un proyecto compartido en Firebase Storage). Bug
+// real esta sesión: sin este chequeo de origen, la rama de abajo (caché
+// primero) también interceptaba las fotos de Storage — la primera vez que
+// se bajaba una foto quedaba guardada para siempre en ese dispositivo, y
+// cuando alguien la volvía a subir editada (mismo archivo, misma URL), acá
+// se seguía sirviendo la versión vieja sin ni preguntarle a la red.
+function esRecursoPropioNoJs(request) {
+  const url = new URL(request.url);
+  return url.origin === self.location.origin;
+}
+
 // fetch() normal no tiene límite de tiempo propio — con señal mala pero
 // presente puede quedar colgado sin nunca resolver ni rechazar. Esto arma
 // una carrera contra un timer: lo que responda primero gana.
@@ -133,6 +147,13 @@ self.addEventListener("fetch", (event) => {
     );
     return;
   }
+
+  // Cross-origin (fotos de Firebase Storage, Firestore, cualquier otro
+  // dominio) — nunca se intercepta acá. El propio código de sync ya tiene
+  // su caché consciente de contenido (por hash) para las fotos; que el SW
+  // cachee esto aparte solo puede terminar sirviendo versiones viejas sin
+  // forma de saberlo.
+  if (!esRecursoPropioNoJs(event.request)) return;
 
   event.respondWith(
     caches.match(event.request).then((respuestaGuardada) => {
