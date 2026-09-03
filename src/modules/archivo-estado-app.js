@@ -1364,20 +1364,36 @@ async function initApp() {
   // Recién acá se sabe con certeza qué pantalla corresponde mostrar (la
   // calculadora con datos embebidos, la Pantalla de Proyectos, o la red de
   // seguridad) — se destapa el splash una sola vez, al final, cubriendo las
-  // 3 ramas de arriba sin repetir la llamada en cada una. Antes de este
-  // cambio no había ningún splash: se veía la calculadora vacía un
-  // instante antes de que la Pantalla de Proyectos apareciera encima.
+  // 3 ramas de arriba sin repetir la llamada en cada una.
   //
-  // 250ms de espera (200ms de la transición CSS de .proy-visible + margen):
-  // si el splash se oculta en el MISMO instante en que la Pantalla de
-  // Proyectos recién empieza su propio fade-in (opacity 0→1 en .2s), queda
-  // casi transparente todavía — se ve la calculadora cruda A TRAVÉS suyo
-  // por esos ~200ms. Bug real reportado por Kevin (03/09/2026): "destello"
-  // que persistía incluso después de arreglar el z-index del login — no
-  // era caché, era esta carrera entre dos transiciones. Con este margen,
-  // el splash se queda tapando hasta que la pantalla de abajo ya está
-  // sólida del todo.
-  setTimeout(ocultarSplashInicial, 250);
+  // Se espera a que la pantalla de abajo esté REALMENTE opaca antes de
+  // destapar, en vez de asumir un tiempo fijo: la Pantalla de Proyectos
+  // tiene su propio fade-in (opacity 0→1) y, si el splash se va mientras
+  // eso corre, se ve la calculadora cruda a través suyo. Un setTimeout fijo
+  // no alcanzaba porque el trabajo previo (consultar compartidos, resolver
+  // invitaciones, bajar proyectos) tarda distinto según la cuenta y la red
+  // — con más proyectos, el fade-in arrancaba después del timeout y el
+  // destello volvía. Bug real reportado por Kevin (03/09/2026): pasaba con
+  // una cuenta y no con la otra, justamente por eso.
+  esperarPantallaOpacaYOcultarSplash();
+}
+
+// Espera a que el overlay que corresponda esté a opacidad plena (o a que se
+// agote el tope de seguridad) antes de sacar el splash. Sondea en cada
+// cuadro de animación: apenas el navegador reporta opacidad 1, destapa.
+function esperarPantallaOpacaYOcultarSplash() {
+  const limite = Date.now() + 3000; // tope duro: el splash NUNCA queda pegado
+  function revisar() {
+    const overlay = document.getElementById("pantalla-proyectos");
+    // Si no hay overlay de Proyectos (rama de datos embebidos o red de
+    // seguridad), no hay nada que esperar: la calculadora ES la pantalla
+    // correcta en ese caso.
+    if (!overlay || overlay.hidden) { ocultarSplashInicial(); return; }
+    const opacidad = parseFloat(getComputedStyle(overlay).opacity);
+    if (opacidad >= 0.99 || Date.now() > limite) { ocultarSplashInicial(); return; }
+    requestAnimationFrame(revisar);
+  }
+  requestAnimationFrame(revisar);
 }
 
 function ocultarSplashInicial() {
