@@ -688,6 +688,11 @@ function cargarProyectoEnApp(data) {
   const pf = document.getElementById("proj-fecha"); if (pf) pf.value = PROJECT_INFO.fecha;
   renderTable();
   renderLevantamientoTab();
+  // Punto común de TODA carga de proyecto (abrir existente, traer versión
+  // remota, importar, migrar): es acá donde la vista de proyecto pasa a ser
+  // la pantalla correcta, así que es acá donde se destapa. Ver
+  // mostrarVistaProyecto() para por qué el estado base es "oculta".
+  mostrarVistaProyecto();
 }
 
 // Abre un proyecto que YA existe en el store 'proyectos'. Devuelve false sin
@@ -995,6 +1000,7 @@ async function crearYAbrirProyectoNuevo() {
   const pf = document.getElementById("proj-fecha"); if (pf) pf.value = "";
   renderTable();
   renderLevantamientoTab();
+  mostrarVistaProyecto(); // crear no pasa por cargarProyectoEnApp, hay que destapar acá también
   UNDO_STACK.length = 0;
   actualizarBotonDeshacer();
   ULTIMO_GUARDADO = null;
@@ -1344,6 +1350,7 @@ async function initApp() {
     try { await idbGuardarActivo(PROYECTO_ACTIVO_ID); } catch (e) {}
     renderTable();
     renderLevantamientoTab();
+    mostrarVistaProyecto(); // datos embebidos: la calculadora SÍ es la pantalla correcta acá
     mostrarToast(`Proyecto cargado automáticamente: ${ROWS.length} fila(s).`);
   } else {
     if (window.esperarAutenticacion) await window.esperarAutenticacion();
@@ -1359,41 +1366,17 @@ async function initApp() {
       for (let i = 0; i < 3; i++) ROWS.push(nuevaFila());
       renderTable();
       renderLevantamientoTab();
+      mostrarVistaProyecto(); // sin Pantalla de Proyectos, la calculadora es lo único que hay
     }
   }
-  // Recién acá se sabe con certeza qué pantalla corresponde mostrar (la
-  // calculadora con datos embebidos, la Pantalla de Proyectos, o la red de
-  // seguridad) — se destapa el splash una sola vez, al final, cubriendo las
-  // 3 ramas de arriba sin repetir la llamada en cada una.
-  //
-  // Se espera a que la pantalla de abajo esté REALMENTE opaca antes de
-  // destapar, en vez de asumir un tiempo fijo: la Pantalla de Proyectos
-  // tiene su propio fade-in (opacity 0→1) y, si el splash se va mientras
-  // eso corre, se ve la calculadora cruda a través suyo. Un setTimeout fijo
-  // no alcanzaba porque el trabajo previo (consultar compartidos, resolver
-  // invitaciones, bajar proyectos) tarda distinto según la cuenta y la red
-  // — con más proyectos, el fade-in arrancaba después del timeout y el
-  // destello volvía. Bug real reportado por Kevin (03/09/2026): pasaba con
-  // una cuenta y no con la otra, justamente por eso.
-  esperarPantallaOpacaYOcultarSplash();
-}
-
-// Espera a que el overlay que corresponda esté a opacidad plena (o a que se
-// agote el tope de seguridad) antes de sacar el splash. Sondea en cada
-// cuadro de animación: apenas el navegador reporta opacidad 1, destapa.
-function esperarPantallaOpacaYOcultarSplash() {
-  const limite = Date.now() + 3000; // tope duro: el splash NUNCA queda pegado
-  function revisar() {
-    const overlay = document.getElementById("pantalla-proyectos");
-    // Si no hay overlay de Proyectos (rama de datos embebidos o red de
-    // seguridad), no hay nada que esperar: la calculadora ES la pantalla
-    // correcta en ese caso.
-    if (!overlay || overlay.hidden) { ocultarSplashInicial(); return; }
-    const opacidad = parseFloat(getComputedStyle(overlay).opacity);
-    if (opacidad >= 0.99 || Date.now() > limite) { ocultarSplashInicial(); return; }
-    requestAnimationFrame(revisar);
-  }
-  requestAnimationFrame(revisar);
+  // Ya se decidió qué pantalla corresponde. El splash se puede sacar sin
+  // ceremonia: la vista de proyecto está OCULTA por defecto
+  // (body.app-arrancando, ver styles.css), así que aunque la Pantalla de
+  // Proyectos todavía esté a mitad de su fade-in, lo que se ve debajo es el
+  // fondo, no una calculadora vacía. Antes esto necesitaba esperar la
+  // opacidad exacta con requestAnimationFrame — ese malabar existía solo
+  // porque el estado base estaba invertido.
+  ocultarSplashInicial();
 }
 
 function ocultarSplashInicial() {
@@ -1401,11 +1384,27 @@ function ocultarSplashInicial() {
   if (el) el.classList.add("splash-oculto");
 }
 
+// Interruptor ÚNICO de la vista de proyecto (header + main). El estado base
+// del HTML es "oculta" (body.app-arrancando, ver styles.css): la
+// calculadora solo se muestra cuando la app decide de verdad abrir un
+// proyecto, nunca "por defecto mientras se decide". Esto es lo que hace que
+// no pueda volver a aparecer un destello de proyecto vacío al arrancar:
+// no hay ningún momento en que la vista de proyecto esté visible sin que
+// alguien la haya pedido explícitamente.
+function mostrarVistaProyecto() {
+  document.body.classList.remove("app-arrancando");
+}
+function ocultarVistaProyecto() {
+  document.body.classList.add("app-arrancando");
+}
+
 document.addEventListener("DOMContentLoaded", initApp);
 
 window.soltarCandadoActivoSiHaceFalta = soltarCandadoActivoSiHaceFalta;
 window.activarListenerProyectoActivo = activarListenerProyectoActivo;
 window.ocultarSplashInicial = ocultarSplashInicial;
+window.mostrarVistaProyecto = mostrarVistaProyecto;
+window.ocultarVistaProyecto = ocultarVistaProyecto;
 window.marcarCambio = marcarCambio;
 window.UNDO_STACK = UNDO_STACK;
 window.pushUndo = pushUndo;

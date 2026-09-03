@@ -806,6 +806,11 @@ async function mostrarPantallaProyectos() {
   overlay.hidden = false;
   overlay.offsetHeight; // forzar reflow para que la transición de entrada corra
   overlay.classList.add("proy-visible");
+  // La vista de proyecto (header + main) se oculta mientras se está en la
+  // lista. No es solo cosmético: evita que quede "asomando" detrás del
+  // overlay durante las transiciones, que es de donde salían los destellos
+  // de proyecto vacío. El interruptor vive en archivo-estado-app.js.
+  if (window.ocultarVistaProyecto) window.ocultarVistaProyecto();
 }
 
 // Refresca solo el popup de cuenta (llamado desde firebase-auth.js tras
