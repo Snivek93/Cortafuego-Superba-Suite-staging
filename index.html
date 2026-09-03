@@ -32,6 +32,18 @@
 </head>
 <body>
 
+<div id="splash-inicio" aria-hidden="true"><div class="splash-spinner"></div></div>
+<script>
+  // Red de seguridad independiente de initApp(): si algo falla a mitad de
+  // camino del arranque (sin señal, error inesperado) y nadie llega a
+  // ocultarSplashInicial(), el splash NO debe quedar tapando la app para
+  // siempre — eso sería peor que el flash que este splash vino a arreglar.
+  setTimeout(function () {
+    var el = document.getElementById("splash-inicio");
+    if (el) el.classList.add("splash-oculto");
+  }, 8000);
+</script>
+
 <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
   <symbol id="i-plus" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v10"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></symbol>
