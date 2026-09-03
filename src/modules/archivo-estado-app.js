@@ -1326,6 +1326,7 @@ document.addEventListener("DOMContentLoaded", initApp);
 
 window.soltarCandadoActivoSiHaceFalta = soltarCandadoActivoSiHaceFalta;
 window.activarListenerProyectoActivo = activarListenerProyectoActivo;
+window.ocultarSplashInicial = ocultarSplashInicial;
 window.marcarCambio = marcarCambio;
 window.UNDO_STACK = UNDO_STACK;
 window.pushUndo = pushUndo;
