@@ -506,6 +506,20 @@ async function renderPantallaProyectos(permitirCerrar) {
 
   if (user && window.fsListarProyectosCompartidosConmigo) {
     try {
+      // Espera a que las invitaciones pendientes terminen de aplicarse antes
+      // de preguntar "¿en qué proyectos estoy como editor?" — si no, se
+      // consulta con el uid todavía fuera de editoresUids y el proyecto
+      // recién compartido no aparece hasta la siguiente entrada (bug real
+      // reportado por Kevin, 03/09/2026). Con tope de 4s: sin señal esto
+      // podría no resolver nunca, y es preferible mostrar la lista sin los
+      // compartidos que dejar la pantalla colgada — igual se vuelven a
+      // pedir en la próxima apertura.
+      if (window.invitacionesResueltas) {
+        await Promise.race([
+          window.invitacionesResueltas(),
+          new Promise((r) => setTimeout(r, 4000)),
+        ]);
+      }
       const remotos = await window.fsListarProyectosCompartidosConmigo(user.uid);
       const idsLocales = new Set(lista.map((p) => p.id));
       for (const remoto of remotos) {

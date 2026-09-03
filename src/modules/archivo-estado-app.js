@@ -20,6 +20,17 @@ var PROYECTO_ACTIVO_FS_VERSION = null;
 // aviso de "solo lectura" es la forma honesta de avisarlo antes de que
 // la persona escriba media hora pensando que se está guardando en la nube.
 var PROYECTO_ACTIVO_CANDADO_PROPIO = false;
+// NUEVO (03/09/2026) — todo proyecto se respalda a Firestore automáticamente
+// desde que se abre con señal, no solo los compartidos explícitamente
+// (decisión de Kevin: "la idea desde el inicio era que se subieran todos,
+// IndexedDB debe ser solo para cuando se pierde el internet"). Pero el
+// candado de edición y el listener en vivo SOLO tienen sentido cuando hay
+// más de un editor real — bloquearte a vos mismo por tu propio candado, o
+// escuchar cambios en vivo de un proyecto que solo vos tocás, no aporta
+// nada y sí agrega lecturas de más. PROYECTO_ACTIVO_COMPARTIDO sigue
+// significando "tiene respaldo en Firestore" (gatilla el sync); esta
+// variable nueva distingue si ADEMÁS tiene otros editores reales.
+var PROYECTO_ACTIVO_MULTI_EDITOR = false;
 // true si el proyecto activo está abierto en modo solo lectura porque otra
 // persona tiene el candado (ver aplicarModoSoloLectura). Se revisa al abrir
 // (tomarCandadoSiCorresponde) — bloqueo "a la puerta": ningún módulo
@@ -452,8 +463,9 @@ async function manejarReconexion() {
   try {
     const remoto = await window.fsDescargarUltimaVersion(idAlEmpezar);
     if (PROYECTO_ACTIVO_ID !== idAlEmpezar) return; // se cambió de proyecto mientras tanto
-    if (!remoto) return; // proyecto nunca compartido — nada que reconciliar
+    if (!remoto) return; // proyecto nunca respaldado — nada que reconciliar
     PROYECTO_ACTIVO_COMPARTIDO = true;
+    PROYECTO_ACTIVO_MULTI_EDITOR = Array.isArray(remoto.editoresUids) && remoto.editoresUids.length > 0;
     const versionDesconocidaOAtrasada =
       PROYECTO_ACTIVO_FS_VERSION === null || remoto.version !== PROYECTO_ACTIVO_FS_VERSION;
     if (PROYECTO_ACTIVO_HUBO_EDICION && versionDesconocidaOAtrasada) {
@@ -467,9 +479,9 @@ async function manejarReconexion() {
       // de este dispositivo pisaba la nube en silencio).
       const ok = await traerVersionRemotaYAdoptar(idAlEmpezar, remoto);
       if (!ok) PROYECTO_ACTIVO_FS_VERSION = remoto.version;
-      await tomarCandadoSiCorresponde(idAlEmpezar);
+      if (PROYECTO_ACTIVO_MULTI_EDITOR) await tomarCandadoSiCorresponde(idAlEmpezar);
     } else {
-      await tomarCandadoSiCorresponde(idAlEmpezar);
+      if (PROYECTO_ACTIVO_MULTI_EDITOR) await tomarCandadoSiCorresponde(idAlEmpezar);
     }
   } catch (e) {
     // Sin señal de verdad (falso positivo del evento 'online') u otro
@@ -818,40 +830,75 @@ async function detectarSiEsCompartido(id) {
   PROYECTO_ACTIVO_COMPARTIDO = false;
   PROYECTO_ACTIVO_FS_VERSION = null;
   PROYECTO_ACTIVO_CANDADO_PROPIO = false;
+  PROYECTO_ACTIVO_MULTI_EDITOR = false;
   if (!window.fsDescargarUltimaVersion || !window.usuarioActual) return;
+  const user = window.usuarioActual();
+  if (!user) return;
   try {
-    const remoto = await window.fsDescargarUltimaVersion(id);
+    let remoto = await window.fsDescargarUltimaVersion(id);
     // Si cambiamos de proyecto mientras esta consulta estaba en vuelo, no
     // pisar el estado del proyecto que se abrió después.
     if (PROYECTO_ACTIVO_ID !== id) return;
+    if (!remoto && window.fsAsegurarProyecto) {
+      // NUEVO (03/09/2026) — todo proyecto se respalda a Firestore desde
+      // que se abre con señal, no solo los compartidos a mano: decisión de
+      // Kevin, "la idea desde el inicio era que se subieran todos,
+      // IndexedDB debe ser solo para cuando se pierde el internet". Si no
+      // hay documento todavía (proyecto nuevo, o uno viejo de antes de
+      // este cambio que nunca se compartió), se crea acá mismo.
+      try {
+        await window.fsAsegurarProyecto(id, {
+          nombre: (typeof PROJECT_INFO !== "undefined" && PROJECT_INFO && PROJECT_INFO.nombre) || "",
+          ownerId: user.uid,
+          ownerEmail: user.email || "",
+        });
+        if (PROYECTO_ACTIVO_ID !== id) return;
+        remoto = await window.fsDescargarUltimaVersion(id);
+      } catch (e2) {
+        // Sin señal a mitad de camino, o el documento no se pudo crear —
+        // se sigue en modo local normal; se reintenta la próxima apertura.
+      }
+    }
     if (remoto) {
       PROYECTO_ACTIVO_COMPARTIDO = true;
+      // El candado y el listener en vivo solo tienen sentido si hay MÁS DE
+      // UN editor de verdad — bloquearte a vos mismo, o escuchar cambios
+      // en vivo de un proyecto que solo vos tocás, no aporta nada y solo
+      // suma lecturas de más.
+      PROYECTO_ACTIVO_MULTI_EDITOR = Array.isArray(remoto.editoresUids) && remoto.editoresUids.length > 0;
       let versionLocalConocida = null;
       try { versionLocalConocida = await idbLeerMetaClave(claveVersionLocal(id)); } catch (e2) {}
+      let seRecuperoContenido = false;
       if (versionLocalConocida === null || versionLocalConocida !== remoto.version) {
         // Esta copia local nunca se sincronizó desde este dispositivo, o
         // quedó atrasada respecto a lo último que subió alguien más. Recién
         // se abrió el proyecto (PROYECTO_ACTIVO_HUBO_EDICION siempre es
         // false acá, ver abrirProyectoExistente) así que no hay nada local
         // que perder: se trae la versión remota antes de tomar el candado.
-        // ANTES de este cambio, un dispositivo que ya tenía el proyecto
-        // guardado localmente jamás volvía a bajar cambios ajenos al
-        // abrirlo — solo se detectaba un conflicto si ESTE dispositivo
-        // intentaba guardar algo, lo cual nunca pasaba si nadie tocaba
-        // nada. Así se quedó sin ver un informe nuevo indefinidamente.
         const ok = await traerVersionRemotaYAdoptar(id, remoto);
         if (!ok) PROYECTO_ACTIVO_FS_VERSION = remoto.version;
+        seRecuperoContenido = ok;
       } else {
         PROYECTO_ACTIVO_FS_VERSION = remoto.version;
       }
       if (PROYECTO_ACTIVO_ID !== id) return; // se cambió de proyecto mientras se bajaba
-      await tomarCandadoSiCorresponde(id);
-      if (PROYECTO_ACTIVO_ID === id) activarListenerProyectoActivo(id);
+      if (PROYECTO_ACTIVO_MULTI_EDITOR) {
+        await tomarCandadoSiCorresponde(id);
+        if (PROYECTO_ACTIVO_ID === id) activarListenerProyectoActivo(id);
+      }
+      if (!remoto.payloadJson && !seRecuperoContenido) {
+        // El documento en Firestore todavía no tiene contenido (recién
+        // creado ahora mismo, o un proyecto viejo/compartido que nunca se
+        // guardó desde que se compartió) — empuja el contenido local
+        // actual ya mismo, sin esperar a que el usuario edite algo. Así,
+        // con solo ABRIR el proyecto una vez con señal alcanza para
+        // respaldarlo.
+        sincronizarConFirestoreAhora();
+      }
     }
   } catch (e) {
-    // Sin señal, permiso denegado (no es tuyo ni te lo compartieron), o el
-    // proyecto nunca se compartió — en cualquier caso, se sigue como
-    // proyecto local normal.
+    // Sin señal, permiso denegado, o cualquier otro fallo — se sigue como
+    // proyecto local normal; se reintenta la próxima vez que se abra.
   }
 }
 
@@ -934,8 +981,9 @@ async function crearYAbrirProyectoNuevo() {
   const id = "p_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
   PROYECTO_ACTIVO_ID = id;
   PROYECTO_ACTIVO_CREADO_EN = new Date().toISOString();
-  PROYECTO_ACTIVO_COMPARTIDO = false; // un proyecto nuevo nunca nace compartido
+  PROYECTO_ACTIVO_COMPARTIDO = false;
   PROYECTO_ACTIVO_FS_VERSION = null;
+  PROYECTO_ACTIVO_MULTI_EDITOR = false;
   PROYECTO_ACTIVO_HUBO_EDICION = false;
   try { await idbGuardarActivo(id); } catch (e) {}
   ROWS = []; ROWS_J = []; MANUAL_ITEMS = []; PLANOS = []; INFORMES_ACREDITACION = [];
@@ -952,6 +1000,11 @@ async function crearYAbrirProyectoNuevo() {
   ULTIMO_GUARDADO = null;
   FALLO_AUTOGUARDADO = false;
   actualizarIndicadorArchivo();
+  // Todo proyecto se respalda a Firestore automáticamente, no solo los
+  // compartidos a mano — ver detectarSiEsCompartido. Fire-and-forget: no
+  // hay nada que esperar acá, el proyecto ya se puede usar local mientras
+  // esto corre de fondo.
+  detectarSiEsCompartido(id);
   return id;
 }
 

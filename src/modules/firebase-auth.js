@@ -321,9 +321,27 @@ function resolverConUsuario(user) {
   ocultarOverlay();
   if (!_yaResolvido) {
     _yaResolvido = true;
-    resolverInvitacionesSiHaceFalta(user);
+    // Se guarda la promesa (no se ignora) para que la Pantalla de Proyectos
+    // pueda esperarla antes de listar. Carrera real reportada por Kevin
+    // (03/09/2026): la lista consultaba "proyectos donde estoy en
+    // editoresUids" ANTES de que la invitación pendiente terminara de
+    // meter el uid en ese array — el proyecto compartido no aparecía la
+    // primera vez, y sí aparecía al volver a entrar (cuando ya estaba
+    // resuelto). Sigue sin bloquear el arranque de la app: solo la lista
+    // de proyectos la espera, y con tope de tiempo.
+    _promesaInvitaciones = resolverInvitacionesSiHaceFalta(user);
     _resolverEsperaAuth(user);
   }
+}
+
+// Promesa de "ya terminé de resolver invitaciones pendientes". Nunca
+// rechaza (resolverInvitacionesSiHaceFalta atrapa todo internamente), así
+// que quien la espera no necesita try/catch — pero sí conviene esperarla
+// con timeout, porque sin señal puede tardar lo que tarde la red en
+// rendirse.
+let _promesaInvitaciones = null;
+function invitacionesResueltas() {
+  return _promesaInvitaciones || Promise.resolve([]);
 }
 
 // Fase 3: mueve cualquier invitación pendiente de este correo a los
@@ -332,15 +350,34 @@ function resolverConUsuario(user) {
 // normal) esto no hace nada visible. Sin señal simplemente falla y se
 // reintenta en el próximo login, no hay nada que perder.
 async function resolverInvitacionesSiHaceFalta(user) {
-  if (!window.fsResolverInvitacionesPendientes || !user.email) return;
+  if (!user.email) return [];
+  // firebase-auth.js se carga ANTES que firestore-sync.js (ver el orden en
+  // index.html). Si la sesión ya estaba guardada y la red responde rápido,
+  // onAuthStateChanged puede disparar cuando fsResolverInvitacionesPendientes
+  // TODAVÍA no existe — antes esto salía por el `if (!window.fs...) return`
+  // y la invitación quedaba sin resolver en silencio hasta la siguiente
+  // entrada a la app. Bug real reportado por Kevin (03/09/2026): "el
+  // proyecto compartido no aparece la primera vez, pero si entro con la
+  // otra cuenta y vuelvo, sí aparece". Se espera a que el módulo cargue
+  // (tope 5s) en vez de rendirse al toque.
+  const limite = Date.now() + 5000;
+  while (!window.fsResolverInvitacionesPendientes && Date.now() < limite) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  if (!window.fsResolverInvitacionesPendientes) {
+    console.error("firestore-sync.js no cargó a tiempo: las invitaciones pendientes se resolverán en la próxima entrada.");
+    return [];
+  }
   try {
     const resueltas = await window.fsResolverInvitacionesPendientes(user.uid, user.email);
     if (resueltas.length > 0 && window.mostrarToast) {
       const nombres = resueltas.map((r) => r.nombre || "un proyecto").join(", ");
       mostrarToast(`Ahora tenés acceso a: ${nombres}.`);
     }
+    return resueltas;
   } catch (e) {
     console.error("No se pudieron resolver invitaciones pendientes:", e);
+    return [];
   }
 }
 
@@ -375,6 +412,7 @@ function usuarioActual() {
 }
 
 window.esperarAutenticacion = esperarAutenticacion;
+window.invitacionesResueltas = invitacionesResueltas;
 window.cerrarSesion = cerrarSesion;
 window.usuarioActual = usuarioActual;
 window.iniciales = iniciales;

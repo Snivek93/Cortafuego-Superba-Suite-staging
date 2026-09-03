@@ -282,7 +282,17 @@ async function fsDescargarUltimaVersion(proyectoId) {
   const snap = await db().collection("proyectos").doc(proyectoId).get();
   if (!snap.exists) return null;
   const data = snap.data();
-  return { payloadJson: data.payloadJson, version: data.versionSync || 0, imagenesUrls: data.imagenesUrls || {} };
+  return {
+    payloadJson: data.payloadJson,
+    version: data.versionSync || 0,
+    imagenesUrls: data.imagenesUrls || {},
+    // editoresUids/ownerId: para que quien llama pueda distinguir un
+    // respaldo privado (nadie más en editoresUids) de un proyecto
+    // realmente compartido — el candado y el listener en vivo solo tienen
+    // sentido en el segundo caso (ver PROYECTO_ACTIVO_MULTI_EDITOR).
+    editoresUids: data.editoresUids || [],
+    ownerId: data.ownerId || null,
+  };
 }
 
 window.fsAsegurarProyecto = fsAsegurarProyecto;
