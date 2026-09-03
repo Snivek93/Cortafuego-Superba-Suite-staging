@@ -384,20 +384,24 @@ async function resolverInvitacionesSiHaceFalta(user) {
 firebase.auth().onAuthStateChanged((user) => {
   if (user && user.emailVerified) {
     resolverConUsuario(user);
+  } else if (_yaResolvido) {
+    // Ya estábamos adentro de la app (con un usuario resuelto) y ahora no
+    // hay usuario válido — cerró sesión, o el correo dejó de estar
+    // verificado, o la sesión expiró. Recargar de una es lo más simple y
+    // seguro para resetear todo el estado en memoria sin arrastrar nada
+    // del usuario anterior. ANTES esto primero renderizaba el formulario
+    // de login/verificar y RECIÉN DESPUÉS recargaba — un parpadeo doble
+    // real, sin sentido: login (viejo) → splash de la recarga → login
+    // (nuevo) de vuelta. Bug real reportado por Kevin (03/09/2026), "pasa
+    // de login a animación de carga a login". Saltárse ese primer render
+    // que se iba a tirar igual dentro de un instante.
+    window.location.reload();
   } else if (user && !user.emailVerified) {
     renderVerificar(user, null);
     mostrarOverlay();
-    if (_yaResolvido) window.location.reload();
   } else {
     renderLogin("login", null);
     mostrarOverlay();
-    // Si el usuario cierra sesión DESPUÉS de que la app ya había arrancado,
-    // lo más simple y seguro es recargar: initApp vuelve a correr desde
-    // cero y queda esperando un nuevo login, sin arrastrar estado a medias
-    // del usuario anterior.
-    if (_yaResolvido) {
-      window.location.reload();
-    }
   }
 });
 
