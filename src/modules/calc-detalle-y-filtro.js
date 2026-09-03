@@ -52,9 +52,7 @@ function detalleCalculoTexto(row, paraPdf) {
   add(row.AH, "Cinta (sin collar)", "cm", 1);
   add(row.AI, "Collarines", "und", 0);
   add(row.AK, "Mortero", u3, 1);
-  add(row.AL, "Lana (CP606)", u2, 1);
   add(row.AM, "Sellador CP606", u3, 1);
-  add(row.AN, "Lana (SIL GG)", u2, 1);
   add(row.AO, "Sellador SIL GG", u3, 1);
   return partes.length ? partes.join(" · ") : "—";
 }
@@ -261,7 +259,7 @@ function renderResumen() {
   }
 
   const matBody = document.getElementById("tbody-materiales");
-  const itemsConManuales = resumen.items.concat(itemsManualesComoResumen());
+  const itemsConManuales = combinarItemsConManuales(resumen.items);
   if (itemsConManuales.length === 0) {
     matBody.innerHTML = `<tr><td colspan="6" class="empty-state">Agregá filas y datos en la pestaña Calculadora para ver el resumen.</td></tr>`;
   } else {
@@ -281,19 +279,26 @@ function renderResumen() {
              data-collar-code="${escapeHtml(it._collarCode)}"
              title="Cambiar talla de collarín"><svg class="icon"><use href="#i-edit"/></svg></button>`
         : "";
+      // Fila calculada que además tiene una parte agregada a mano: se muestra
+      // sumada, con el aviso de cuánto es manual y un botón que quita solo esa parte.
+      const extra = Number(it.manualExtra) || 0;
+      const badge = it.manual
+        ? ' <span class="badge-manual" title="Agregado a mano">manual</span>'
+        : (extra > 0 ? ` <span class="badge-manual" title="De la cantidad total, ${extra} se agregó a mano">incluye ${extra} manual</span>` : "");
+      const quitarBtn = (it.manual || extra > 0)
+        ? `<button type="button" class="btn-quitar-manual" data-manual-ids="${(it._manualIds || []).join(",")}" title="${it.manual ? "Quitar" : "Quitar la parte manual"}"><svg class="icon"><use href="#i-close"/></svg></button>`
+        : "";
       return `<tr class="${it.manual ? "fila-manual" : ""}">
         <td>${escapeHtml(it.codigo)}</td>
         <td class="num">${it.cantidad}</td>
-        <td><strong>${escapeHtml(tituloCaseProducto(it.producto))}</strong>${it.manual ? ' <span class="badge-manual" title="Agregado a mano">manual</span>' : ""}</td>
+        <td><strong>${escapeHtml(tituloCaseProducto(it.producto))}</strong>${badge}</td>
         <td>${escapeHtml(it.presentacion)}</td>
         <td>${escapeHtml(tituloCase(it.tipo))}</td>
-        <td>${it.manual
-          ? `<button type="button" class="btn-quitar-manual" data-manual-id="${it._manualId}" title="Quitar"><svg class="icon"><use href="#i-close"/></svg></button>`
-          : editBtn}</td>
+        <td>${editBtn}${quitarBtn}</td>
       </tr>`;
     }).join("");
     matBody.querySelectorAll(".btn-quitar-manual").forEach(btn => {
-      btn.addEventListener("click", () => quitarItemManual(Number(btn.dataset.manualId)));
+      btn.addEventListener("click", () => quitarItemsManuales(String(btn.dataset.manualIds || "").split(",")));
     });
     // Botones de editar talla de collarín
     matBody.querySelectorAll(".btn-editar-collar").forEach(btn => {

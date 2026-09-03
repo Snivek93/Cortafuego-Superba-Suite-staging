@@ -283,7 +283,7 @@ function construirReportePDF(opciones) {
   }
 
   if (opts.resumen) {
-    const itemsConManualesPdf = resumen.items.concat(itemsManualesComoResumen());
+    const itemsConManualesPdf = combinarItemsConManuales(resumen.items);
     asegurarEspacio(alturaTablaAprox(itemsConManualesPdf.length, 8, 4));
     dibujarTituloSeccion("Cuantificación de Materiales Hilti");
     doc.autoTable({
@@ -292,7 +292,7 @@ function construirReportePDF(opciones) {
       pageBreak: "avoid",
       head: [["Código", "Cantidad", "Producto", "Presentación", "Tipo"]],
       body: itemsConManualesPdf.length
-        ? itemsConManualesPdf.map(it => [it.codigo, String(it.cantidad), tituloCaseProducto(it.producto) + (it.manual ? " (manual)" : ""), it.presentacion, tituloCase(it.tipo)])
+        ? itemsConManualesPdf.map(it => [it.codigo, String(it.cantidad), tituloCaseProducto(it.producto) + (it.manual ? " (manual)" : (Number(it.manualExtra) > 0 ? " (incluye " + it.manualExtra + " manual)" : "")), it.presentacion, tituloCase(it.tipo)])
         : [["Sin materiales calculados", "", "", "", ""]],
       styles: { fontSize: 8, cellPadding: 4 },
       headStyles: { fillColor: [26, 26, 26], textColor: 255 },

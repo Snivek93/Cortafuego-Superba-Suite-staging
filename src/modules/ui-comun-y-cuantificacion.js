@@ -119,7 +119,15 @@ function abrirModalAgregarManual() {
 }
 
 function quitarItemManual(id) {
-  MANUAL_ITEMS = MANUAL_ITEMS.filter(m => m._id !== id);
+  quitarItemsManuales([id]);
+}
+
+// Quita una o varias entradas manuales de golpe — una fila del Resumen puede
+// juntar más de un agregado a mano del mismo producto.
+function quitarItemsManuales(ids) {
+  const set = new Set((Array.isArray(ids) ? ids : [ids]).map(Number).filter(v => !isNaN(v)));
+  if (!set.size) return;
+  MANUAL_ITEMS = MANUAL_ITEMS.filter(m => !set.has(Number(m._id)));
   renderResumen();
   marcarCambio();
 }
@@ -147,5 +155,6 @@ window.mostrarToastProgreso = mostrarToastProgreso;
 window.ocultarToastProgreso = ocultarToastProgreso;
 window.abrirModalAgregarManual = abrirModalAgregarManual;
 window.quitarItemManual = quitarItemManual;
+window.quitarItemsManuales = quitarItemsManuales;
 window.pedirConfirmacion = pedirConfirmacion;
 })();

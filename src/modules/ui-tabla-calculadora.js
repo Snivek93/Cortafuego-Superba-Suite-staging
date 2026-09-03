@@ -47,8 +47,56 @@ let MODAL_MANUAL_PRODUCTO_SEL = "otro"; // clave "nombre|||presentacion" de PROD
 function itemsManualesComoResumen() {
   return MANUAL_ITEMS.map(m => ({
     tipo: m.tipo, producto: m.producto, presentacion: m.presentacion, codigo: m.codigo,
-    cantidad: m.cantidad, manual: true, _manualId: m._id,
+    cantidad: m.cantidad, manual: true, _manualIds: [m._id],
   }));
+}
+
+// Clave de identidad de un ítem de Cuantificación. El código de artículo manda
+// cuando existe (el catálogo PRODUCTOS y el motor de cálculo escriben la misma
+// presentación con distintas palabras — ej. "Plancha 122x61x10 cm" vs
+// "116 cm x 61 cm x 10 cm" — pero el mismo #42010092). Sin código válido se cae
+// a producto+presentación.
+function claveItemResumen(it) {
+  const cod = String(it.codigo == null ? "" : it.codigo).trim().toLowerCase();
+  if (cod && cod !== "-" && cod !== "#") return "cod:" + cod.replace(/^#/, "");
+  return "np:" + String(it.producto || "").trim().toLowerCase() + "|||" +
+         String(it.presentacion || "").trim().toLowerCase();
+}
+
+// Une los productos agregados a mano con los calculados: si el producto ya
+// existe en el resumen, se suma la cantidad a la misma fila y se deja anotado
+// cuánto de esa cantidad vino a mano (manualExtra) para poder mostrar el aviso
+// y borrar solo esa parte. Si no existe, entra como fila manual aparte.
+function combinarItemsConManuales(items) {
+  const base = (items || []).map(it => Object.assign({}, it));
+  const idx = new Map();
+  base.forEach((it, i) => {
+    const k = claveItemResumen(it);
+    if (!idx.has(k)) idx.set(k, i);
+  });
+  const sueltos = [];
+  MANUAL_ITEMS.forEach(m => {
+    const cant = Number(m.cantidad) || 0;
+    const k = claveItemResumen(m);
+    if (idx.has(k)) {
+      const dst = base[idx.get(k)];
+      dst.cantidad = (Number(dst.cantidad) || 0) + cant;
+      dst.manualExtra = (Number(dst.manualExtra) || 0) + cant;
+      dst._manualIds = (dst._manualIds || []).concat(m._id);
+      return;
+    }
+    const j = sueltos.findIndex(s => claveItemResumen(s) === k);
+    if (j >= 0) {
+      sueltos[j].cantidad = (Number(sueltos[j].cantidad) || 0) + cant;
+      sueltos[j]._manualIds.push(m._id);
+      return;
+    }
+    sueltos.push({
+      tipo: m.tipo, producto: m.producto, presentacion: m.presentacion, codigo: m.codigo,
+      cantidad: cant, manual: true, _manualIds: [m._id],
+    });
+  });
+  return base.concat(sueltos);
 }
 const PROJECT_INFO = { nombre: "", cliente: "", fecha: new Date().toISOString().slice(0, 10) };
 
@@ -106,6 +154,7 @@ window.CONFIG = CONFIG;
 window.CONFIG_DEFAULT = CONFIG_DEFAULT;
 window.RESUMEN_MODO_PRODUCTO = RESUMEN_MODO_PRODUCTO;
 window.itemsManualesComoResumen = itemsManualesComoResumen;
+window.combinarItemsConManuales = combinarItemsConManuales;
 window.PROJECT_INFO = PROJECT_INFO;
 window.nuevaFila = nuevaFila;
 window.kFromL = kFromL;

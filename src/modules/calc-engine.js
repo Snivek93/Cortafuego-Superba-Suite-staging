@@ -350,7 +350,14 @@ function computeRow(row, config) {
     // Collarín con espacio anular: el aislamiento del tubo requiere lana mineral
     // para rellenar el espacio, igual que la pasta con espacio anular.
     aplicaLana = true;
-  } else if (eq(P, MAT_PASTA) && neq(Qtext, ERR_MATERIAL)) {
+  } else if ((eq(P, MAT_PASTA) || eq(P, MAT_CP606) || eq(P, MAT_CFS_SIL_GG)) &&
+             neq(Qtext, ERR_MATERIAL) && Qtext !== ERR_COMBUSTIBLE_SELLADOR) {
+    // CP 606 y CFS SIL GG son selladores igual que la pasta: si hay espacio
+    // anular (o es gaveta/vacío/bandeja, donde el relleno es obligatorio) la
+    // lana mineral se calcula exactamente igual que con FS ONE MAX — incluida
+    // la rama de pared gruesa por volumen. Antes esto vivía aparte en AL/AN,
+    // solo por área y sin cubrir las gavetas sin espacio anular (bug real
+    // reportado por Kevin 03/09/2026).
     if (eq(L, TIPO_VACIO) || eq(L, TIPO_PASANTE_MULT) || eq(L, TIPO_BANDEJA)) aplicaLana = true;
     else aplicaLana = n(I) !== 0;
   }
@@ -622,25 +629,21 @@ function computeRow(row, config) {
   const AK = (eq(P, MAT_MORTERO) && neq(Qtext, ERR_MATERIAL)) ? n(U) * n(V) * 2.54 : "-";
   out.AK = AK;
 
-  // AL/AM: sellador CP 606 (área lana / volumen)
-  let AL, AM;
-  if (eq(P, MAT_CP606) && neq(Qtext, ERR_MATERIAL) && Qtext !== ERR_COMBUSTIBLE_SELLADOR) {
-    AL = (n(I) === 0) ? "-" : n(U);
-  } else AL = "-";
+  // AM: sellador CP 606 (volumen). La lana de CP 606 ya NO se calcula acá
+  // (antes era AL, solo por área): ahora entra por lanaAreaCm2Pen /
+  // lanaVolumenCm3Pen, con las mismas reglas que FS ONE MAX.
+  let AM;
   if (eq(P, MAT_CP606) && neq(Qtext, ERR_MATERIAL) && Qtext !== ERR_COMBUSTIBLE_SELLADOR) {
     AM = (n(C) === 0) ? "-" : n(U) * (n(V) * 2.54) * n(S);
   } else AM = "-";
-  out.AL = AL; out.AM = AM;
+  out.AM = AM;
 
-  // AN/AO: sellador CFS SIL GG (área lana / volumen)
-  let AN, AO;
-  if (eq(P, MAT_CFS_SIL_GG) && neq(Qtext, ERR_MATERIAL) && Qtext !== ERR_COMBUSTIBLE_SELLADOR) {
-    AN = (n(I) === 0) ? "-" : n(U);
-  } else AN = "-";
+  // AO: sellador CFS SIL GG (volumen). Ídem AM: la lana ya no sale de acá.
+  let AO;
   if (eq(P, MAT_CFS_SIL_GG) && neq(Qtext, ERR_MATERIAL) && Qtext !== ERR_COMBUSTIBLE_SELLADOR) {
     AO = (n(C) === 0) ? "-" : n(U) * (n(V) * 2.54) * n(S);
   } else AO = "-";
-  out.AN = AN; out.AO = AO;
+  out.AO = AO;
 
   return out;
 }
@@ -701,7 +704,7 @@ function computeResumen(computedRows, waste, umbrales) {
   // y la de pared gruesa por VOLUMEN — cada una se redondea por separado
   // (distinto divisor: plancha completa vs. solo su área) y se suman, igual
   // criterio que ya se usa para Juntas.
-  const areaLanaTotal = S("lanaAreaCm2Pen") + S("AL") + S("AN");
+  const areaLanaTotal = S("lanaAreaCm2Pen");
   const volLanaTotal = S("lanaVolumenCm3Pen");
   const lanaAreaUnid = areaLanaTotal > 0 ? roundup((areaLanaTotal * w) / (122 * 61), 0) : 0;
   const lanaVolUnid = volLanaTotal > 0 ? roundup((volLanaTotal * w) / (122 * 61 * 10), 0) : 0;
@@ -773,7 +776,7 @@ function computeResumen(computedRows, waste, umbrales) {
     if ((eq(r.P, MAT_CINTA_CON) || eq(r.P, MAT_CINTA_SIN)) && n(r.Y) > 0) entry.materiales.add(MAT_PASTA);
     if (r.A || r.B) entry.zonas.add(`${r.A || "-"}${r.B ? " · Nivel " + r.B : ""}`);
     else entry.zonas.add("-");
-    if (n(r.X) > 0 || n(r.AL) > 0 || n(r.AN) > 0) entry.usaLana = true; // hubo espacio anular real en el proyecto
+    if (n(r.X) > 0) entry.usaLana = true; // hubo relleno de lana real en el proyecto
     // Collarín con espacio anular: Y > 0 implica que se usa pasta + lana
     if (r.P === MAT_COLLARIN && n(r.Y) > 0) entry.usaLana = true;
   }
