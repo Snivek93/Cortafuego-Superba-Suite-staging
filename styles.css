@@ -189,6 +189,21 @@ header.app-header h1 { font-size: var(--fs-md); margin: 0; font-weight: 600; let
 .tab-btn.active { color: var(--ink); border-bottom-color: var(--hilti-red); }
 @media (hover: hover) and (pointer: fine) { .tab-btn:hover { color: var(--ink); } }
 main { padding: 16px var(--edge-pad) 60px; }
+/* ESTADO BASE DE ARRANQUE — la app NO nace mostrando la calculadora.
+   Antes, el HTML se renderizaba con la vista de proyecto visible y la
+   Pantalla de Proyectos aparecía encima como overlay unos instantes
+   después; cualquier demora (más proyectos, red lenta, transición CSS a
+   medio camino) dejaba ver un "destello" de un proyecto vacío que no
+   correspondía. Se arregló con temporizadores tres veces y siempre volvía
+   por otro lado, porque la base estaba invertida.
+   Ahora: <body> arranca con .app-arrancando (puesto en el HTML, no por JS,
+   así aplica desde el primer frame pintado) y la vista de proyecto solo
+   aparece cuando la app decide explícitamente abrir un proyecto — ver
+   mostrarVistaProyecto()/ocultarVistaProyecto() en archivo-estado-app.js.
+   Kevin, 03/09/2026: "tenemos que hacer algo con el código para que por
+   defecto la pantalla sea la de proyectos, si no seguirá pasando". */
+body.app-arrancando > main,
+body.app-arrancando > header.app-header { display: none; }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
 .app-footer { padding: 18px var(--edge-pad) 28px; text-align: center; }
