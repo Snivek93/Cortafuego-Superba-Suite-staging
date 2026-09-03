@@ -213,6 +213,21 @@ function fsEscucharCandado(proyectoId, callback) {
   );
 }
 
+// Suscripción en vivo al documento COMPLETO — para que quien tiene el
+// proyecto abierto (viéndolo, no necesariamente editándolo) vea los cambios
+// de otra persona en segundos, sin tener que cerrar y volver a abrir. Un
+// solo listener a la vez (el proyecto abierto), no uno por tarjeta de la
+// lista — ver fsEscucharCandado arriba para el porqué de esa distinción.
+// callback recibe (data, metadata); metadata.hasPendingWrites permite
+// distinguir el eco optimista de una escritura propia (todavía no
+// confirmada por el servidor) de un cambio que realmente vino de afuera.
+function fsEscucharProyecto(proyectoId, callback) {
+  return db().collection("proyectos").doc(proyectoId).onSnapshot(
+    (snap) => { if (snap.exists) callback(snap.data(), snap.metadata); },
+    (err) => console.error("Error escuchando proyecto", proyectoId, err)
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Sync de contenido + detección de conflicto por versión
 // ---------------------------------------------------------------------------
@@ -279,6 +294,7 @@ window.fsListarMisProyectosCompartidos = fsListarMisProyectosCompartidos;
 window.fsTomarCandado = fsTomarCandado;
 window.fsSoltarCandado = fsSoltarCandado;
 window.fsEscucharCandado = fsEscucharCandado;
+window.fsEscucharProyecto = fsEscucharProyecto;
 window.fsSubirCambios = fsSubirCambios;
 window.fsDescargarUltimaVersion = fsDescargarUltimaVersion;
 // Exportado aparte para poder probar la lógica de vencimiento sin Firestore real.
