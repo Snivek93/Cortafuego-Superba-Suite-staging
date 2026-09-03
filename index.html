@@ -32,16 +32,26 @@
 </head>
 <body class="app-arrancando">
 
-<div id="splash-inicio" aria-hidden="true"><div class="splash-spinner"></div></div>
+<div id="splash-inicio" aria-hidden="true">
+  <img class="splash-logo" src="icons/icon-192.png" alt="" width="72" height="72">
+</div>
 <script>
   // Red de seguridad independiente de initApp(): si algo falla a mitad de
   // camino del arranque (sin señal, error inesperado) y nadie llega a
   // ocultarSplashInicial(), el splash NO debe quedar tapando la app para
   // siempre — eso sería peor que el flash que este splash vino a arreglar.
+  // 25s, no 8s: bug real esta sesión — Kevin tardó unos segundos eligiendo
+  // la contraseña en el selector nativo de iOS antes de tocar "Iniciar
+  // sesión", y el tope de 8s saltó A MITAD del login real, apagando el
+  // único indicador de carga que había — se vio una pantalla en blanco por
+  // el resto de la espera real. Este tope es una última red de seguridad
+  // ante un error genuino, no una expectativa de caso normal — la
+  // interacción humana (gestor de contraseñas, 2FA) puede tardar bastante
+  // más que unos pocos segundos sin que nada esté roto.
   setTimeout(function () {
     var el = document.getElementById("splash-inicio");
     if (el) el.classList.add("splash-oculto");
-  }, 8000);
+  }, 25000);
 </script>
 
 <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
