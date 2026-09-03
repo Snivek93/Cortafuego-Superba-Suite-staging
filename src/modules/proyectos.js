@@ -788,6 +788,16 @@ function ocultarPantallaProyectos() {
   if (!overlay) return;
   overlay.classList.remove("proy-visible");
   setTimeout(() => { overlay.hidden = true; }, 200);
+  // La vista de proyecto arranca OCULTA por defecto (body.app-arrancando,
+  // ver styles.css) y solo se muestra cuando alguien la pide explícitamente
+  // — antes de ese cambio, <main>/header estaban SIEMPRE visibles debajo
+  // del overlay, así que con solo esconder Proyectos ya quedaba a la
+  // vista. Este botón "Volver" (arriba a la izquierda, cuando hay un
+  // proyecto de fondo) es el único camino de vuelta que no pasa por
+  // abrirProyectoExistente/crearYAbrirProyectoNuevo/cargarProyectoEnApp —
+  // se me escapó al hacer ese cambio. Bug real reportado por Kevin
+  // (03/09/2026): pantalla negra sin nada al tocar "Volver".
+  if (window.mostrarVistaProyecto) window.mostrarVistaProyecto();
 }
 
 async function mostrarPantallaProyectos() {
