@@ -777,6 +777,15 @@ function ocultarPantallaProyectos() {
 }
 
 async function mostrarPantallaProyectos() {
+  // Salir a la lista de Proyectos cuenta como "cerrar" el proyecto que se
+  // estaba editando — antes esto NO pasaba (solo se soltaba el candado al
+  // abrir OTRO proyecto puntual), así que alguien que volvía a la lista sin
+  // abrir nada más se quedaba con el candado pegado, y para el resto de la
+  // organización el proyecto seguía viéndose "en edición" indefinidamente
+  // (hasta el timeout de 5 min). Bug real reportado por Kevin.
+  if (window.soltarCandadoActivoSiHaceFalta) {
+    try { await window.soltarCandadoActivoSiHaceFalta(); } catch (e) { /* best-effort */ }
+  }
   const hayProyectoAbierto = !!window.PROYECTO_ACTIVO_ID;
   await renderPantallaProyectos(hayProyectoAbierto);
   const overlay = document.getElementById("pantalla-proyectos");

@@ -758,6 +758,56 @@ async function traerVersionRemotaYAdoptar(id, remoto) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Listener en vivo del proyecto abierto — Kevin pidió esto explícitamente
+// (03/09/2026): que un cambio de una cuenta se vea en segundos en la otra,
+// sin tener que cerrar y volver a abrir. UN SOLO listener a la vez (el
+// proyecto que está abierto ahora mismo) — no uno por cada tarjeta de la
+// lista de Proyectos, eso sería caro y no hace falta.
+//
+// Costo: Firestore cobra 1 lectura por CAMBIO real del documento mientras
+// hay alguien escuchando — no cobra nada mientras nadie edita, a diferencia
+// de un sondeo con setInterval que cobraría igual aunque no haya cambios.
+// Con offline persistence desactivada (decisión de arquitectura ya tomada),
+// cada reconexión de red cuenta como lectura nueva — aceptable al volumen
+// de este equipo, ver conversación del 03/09/2026 en la guía de continuidad.
+let UNSUB_LISTENER_PROYECTO = null;
+let listenerProyectoTimer = null;
+
+function activarListenerProyectoActivo(id) {
+  desactivarListenerProyectoActivo();
+  if (!window.fsEscucharProyecto) return;
+  UNSUB_LISTENER_PROYECTO = window.fsEscucharProyecto(id, (data, metadata) => {
+    manejarActualizacionEnVivo(id, data, metadata);
+  });
+}
+
+function desactivarListenerProyectoActivo() {
+  if (listenerProyectoTimer) { clearTimeout(listenerProyectoTimer); listenerProyectoTimer = null; }
+  if (UNSUB_LISTENER_PROYECTO) {
+    try { UNSUB_LISTENER_PROYECTO(); } catch (e) { /* best-effort */ }
+    UNSUB_LISTENER_PROYECTO = null;
+  }
+}
+
+// Con espera corta (1.5s) para no repintar toda la pantalla en cada tecla
+// de quien está editando del otro lado — si vienen varios cambios seguidos,
+// solo se aplica el último.
+function manejarActualizacionEnVivo(id, data, metadata) {
+  if (PROYECTO_ACTIVO_ID !== id) return;
+  if (metadata && metadata.hasPendingWrites) return; // eco optimista de una escritura propia, todavía sin confirmar
+  const versionRemota = data.versionSync || 0;
+  if (versionRemota === PROYECTO_ACTIVO_FS_VERSION) return; // nada nuevo
+  if (PROYECTO_ACTIVO_HUBO_EDICION) return; // tenemos cambios propios sin confirmar — no pisar; se resuelve por el camino normal de conflicto al guardar
+  if (listenerProyectoTimer) clearTimeout(listenerProyectoTimer);
+  listenerProyectoTimer = setTimeout(() => {
+    listenerProyectoTimer = null;
+    if (PROYECTO_ACTIVO_ID !== id || PROYECTO_ACTIVO_HUBO_EDICION) return;
+    const remoto = { payloadJson: data.payloadJson, version: versionRemota, imagenesUrls: data.imagenesUrls || {} };
+    traerVersionRemotaYAdoptar(id, remoto);
+  }, 1500);
+}
+
 async function detectarSiEsCompartido(id) {
   PROYECTO_ACTIVO_COMPARTIDO = false;
   PROYECTO_ACTIVO_FS_VERSION = null;
@@ -790,6 +840,7 @@ async function detectarSiEsCompartido(id) {
       }
       if (PROYECTO_ACTIVO_ID !== id) return; // se cambió de proyecto mientras se bajaba
       await tomarCandadoSiCorresponde(id);
+      if (PROYECTO_ACTIVO_ID === id) activarListenerProyectoActivo(id);
     }
   } catch (e) {
     // Sin señal, permiso denegado (no es tuyo ni te lo compartieron), o el
@@ -845,6 +896,7 @@ function aplicarModoSoloLectura(activo, ocupadoPor) {
 // minutos expira solo.
 async function soltarCandadoActivoSiHaceFalta() {
   aplicarModoSoloLectura(false); // el proyecto que se deja atrás nunca queda en solo lectura "pegado"
+  desactivarListenerProyectoActivo(); // el listener en vivo es del proyecto ABIERTO — nunca debe seguir corriendo tras salir
   // El reintento de fotos es por proyecto — si se cambia de proyecto, el
   // que se deja atrás no debe seguir reintentando en segundo plano.
   if (reintentoFotosTimer) { clearTimeout(reintentoFotosTimer); reintentoFotosTimer = null; }
@@ -1254,6 +1306,8 @@ async function initApp() {
 
 document.addEventListener("DOMContentLoaded", initApp);
 
+window.soltarCandadoActivoSiHaceFalta = soltarCandadoActivoSiHaceFalta;
+window.activarListenerProyectoActivo = activarListenerProyectoActivo;
 window.marcarCambio = marcarCambio;
 window.UNDO_STACK = UNDO_STACK;
 window.pushUndo = pushUndo;
