@@ -935,7 +935,15 @@ main.solo-lectura .tab-btn { opacity: 1; pointer-events: auto; }
 .proy-account-logout-link { background: none; border: none; color: var(--hilti-red); font-size: var(--fs-xs); font-weight: 600; cursor: pointer; padding: 4px 6px; }
 
 /* --- Pantalla de Login (Firebase Auth) --- */
-.pantalla-login-overlay { position: fixed; inset: 0; z-index: 8500; background: var(--surface); display: flex; align-items: center; justify-content: center; padding: 16px; overflow-y: auto; opacity: 0; transition: opacity .2s ease; }
+/* z-index 10000: por encima de #splash-inicio (9999) A PROPÓSITO — el splash
+   se queda "activo" de fondo durante TODA la transición login → autenticado
+   → Proyectos (nunca se oculta hasta el final real de initApp()), así que
+   cuando este overlay de login/verificar se cierra, lo que queda debajo es
+   el splash (spinner), no la calculadora vacía. Bug real reportado por
+   Kevin (03/09/2026): con el z-index invertido, el splash tapaba el propio
+   formulario de login — el spinner "eterno" no era la red, era el splash
+   bloqueando un formulario que ya estaba listo abajo. */
+.pantalla-login-overlay { position: fixed; inset: 0; z-index: 10000; background: var(--surface); display: flex; align-items: center; justify-content: center; padding: 16px; overflow-y: auto; opacity: 0; transition: opacity .2s ease; }
 .pantalla-login-overlay[hidden] { display: none; }
 .pantalla-login-overlay.auth-visible { opacity: 1; }
 .pantalla-login-overlay .auth-panel { transform: scale(0.97) translateY(6px); transition: transform .2s ease; }
