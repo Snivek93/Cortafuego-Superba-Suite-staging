@@ -116,7 +116,6 @@ function tarjetaProyectoHTML(id, data, esBorrador, modoManual, esCompartido, can
         ${candadoAjeno ? `<p class="proy-card-candado"><svg class="icon"><use href="#i-lock"/></svg>${escapeHtml(candadoAjeno)} está editando</p>` : ""}
       </div>
       <div class="proy-card-right">
-        ${!esBorrador ? `<button type="button" class="proy-card-compartir" data-id="${escapeHtml(id)}" title="Compartir" aria-label="Compartir"><svg class="icon"><use href="#i-share"/></svg></button>` : ""}
         ${!esBorrador ? `<button type="button" class="proy-card-mover" data-id="${escapeHtml(id)}" title="Mover a carpeta" aria-label="Mover a carpeta"><svg class="icon"><use href="#i-folder"/></svg></button>` : ""}
         ${(!esBorrador && esDueno) ? `<button type="button" class="proy-card-mover-espacio" data-id="${escapeHtml(id)}" ${candadoAjeno ? "disabled" : ""} title="${candadoAjeno ? "Bloqueado: alguien lo está editando" : "Mover de espacio"}" aria-label="Mover de espacio"><svg class="icon"><use href="#i-share"/></svg></button>` : ""}
         <button type="button" class="proy-card-borrar" data-id="${escapeHtml(id)}" data-propio="${esCompartido ? "0" : "1"}" title="Borrar proyecto" aria-label="Borrar proyecto">
@@ -602,66 +601,6 @@ function dropdownEspacioHTML() {
     </div>`;
 }
 
-function abrirModalCompartir(proyectoId, nombreProyecto, clienteProyecto, fechaProyecto) {
-  if (!window.fsCompartirProyecto || !window.fsAsegurarProyecto) {
-    if (window.mostrarToast) mostrarToast("Compartir todavía no está disponible en esta versión.", "error");
-    return;
-  }
-  const overlay = document.createElement("div");
-  overlay.className = "modal-overlay";
-  overlay.innerHTML = `
-    <div class="modal-box">
-      <p style="font-weight:600;margin:0 0 2px;">Compartir "${escapeHtml(nombreProyecto || "proyecto")}"</p>
-      <p style="font-size:13px;color:var(--text-muted, #888);margin:0 0 12px;">Se invita por correo. Si la persona todavía no tiene cuenta, va a quedar pendiente hasta que cree una con ese mismo correo.</p>
-      <input type="email" id="proy-compartir-email" placeholder="correo@superba.cr" style="width:100%;box-sizing:border-box;height:40px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--fs-base);margin-bottom:4px;" />
-      <p class="auth-error" id="proy-compartir-error" style="display:none;"></p>
-      <div class="modal-actions">
-        <button class="secondary" data-act="cancel">Cancelar</button>
-        <button class="primary" data-act="compartir">Compartir</button>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-  const input = document.getElementById("proy-compartir-email");
-  input.focus();
-
-  const hacerCompartir = async () => {
-    const email = input.value.trim().toLowerCase();
-    const errorEl = document.getElementById("proy-compartir-error");
-    if (!email || !email.includes("@")) {
-      errorEl.textContent = "Ingresá un correo válido.";
-      errorEl.style.display = "block";
-      return;
-    }
-    const user = window.usuarioActual ? window.usuarioActual() : null;
-    if (!user) { errorEl.textContent = "No se pudo identificar tu cuenta."; errorEl.style.display = "block"; return; }
-    if (email === (user.email || "").toLowerCase()) {
-      errorEl.textContent = "Ese es tu propio correo.";
-      errorEl.style.display = "block";
-      return;
-    }
-    const btn = overlay.querySelector('[data-act="compartir"]');
-    btn.disabled = true;
-    const textoOriginal = btn.textContent;
-    btn.textContent = "Un momento…";
-    try {
-      await window.fsAsegurarProyecto(proyectoId, { nombre: nombreProyecto, cliente: clienteProyecto, fecha: fechaProyecto, ownerId: user.uid, ownerEmail: user.email || "" });
-      await window.fsCompartirProyecto(proyectoId, nombreProyecto, email, "editor", user.email || "");
-      overlay.remove();
-      if (window.mostrarToast) mostrarToast(`Invitación enviada a ${email}. Va a ver el proyecto en su próximo inicio de sesión.`);
-    } catch (e) {
-      errorEl.textContent = e && e.message ? e.message : "No se pudo compartir. Revisá tu conexión y probá de nuevo.";
-      errorEl.style.display = "block";
-      btn.disabled = false;
-      btn.textContent = textoOriginal;
-    }
-  };
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter") hacerCompartir(); });
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay || e.target.dataset.act === "cancel") { overlay.remove(); return; }
-    if (e.target.dataset.act === "compartir") hacerCompartir();
-  });
-}
-
 function ligarDragReordenarProyectos(lista, carpetaId) {
   if (!lista || lista.dataset.proyDragBind) return;
   lista.dataset.proyDragBind = "1";
@@ -976,7 +915,14 @@ async function renderPantallaProyectos(permitirCerrar) {
       ${seccionBorradores}
       ${vacio}
     </div>
-    <button type="button" class="proy-fab" id="proy-btn-nuevo" aria-label="Nuevo proyecto"><svg class="icon"><use href="#i-plus"/></svg></button>`;
+    <div class="proy-fab-wrap">
+      <div class="proy-fab-menu" id="proy-fab-menu">
+        <button type="button" class="proy-fab-menu-item" id="proy-fab-menu-nuevo"><svg class="icon"><use href="#i-plus"/></svg>Proyecto nuevo</button>
+        <button type="button" class="proy-fab-menu-item" id="proy-fab-menu-abrir"><svg class="icon"><use href="#i-upload"/></svg>Abrir archivo</button>
+      </div>
+      <button type="button" class="proy-fab" id="proy-btn-nuevo" aria-label="Nuevo proyecto o abrir archivo"><svg class="icon"><use href="#i-plus"/></svg></button>
+      <input type="file" id="proy-fab-input-abrir" accept=".fss,.json,application/json,application/octet-stream,text/plain" style="display:none" />
+    </div>`;
 
   overlay.querySelectorAll('.proy-card[data-tipo="proyecto"]').forEach((card) => {
     card.addEventListener("click", async (e) => {
@@ -1068,16 +1014,6 @@ async function renderPantallaProyectos(permitirCerrar) {
     });
   });
 
-  overlay.querySelectorAll(".proy-card-compartir").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const id = btn.getAttribute("data-id");
-      const proyecto = conNombre.find((p) => p.id === id);
-      const info = proyecto && proyecto.data.projectInfo;
-      abrirModalCompartir(id, info && info.nombre, info && info.cliente, info && info.fecha);
-    });
-  });
-
   overlay.querySelectorAll(".proy-orden-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       MODO_ORDEN = btn.getAttribute("data-orden");
@@ -1102,14 +1038,45 @@ async function renderPantallaProyectos(permitirCerrar) {
   const btnCerrar = document.getElementById("proy-btn-cerrar");
   if (btnCerrar) btnCerrar.addEventListener("click", ocultarPantallaProyectos);
 
-  document.getElementById("proy-btn-nuevo").addEventListener("click", async () => {
-    const nuevoId = await window.crearYAbrirProyectoNuevo();
-    if (CARPETA_ACTIVA_ID && nuevoId) {
-      CARPETA_ASIGNACIONES[nuevoId] = CARPETA_ACTIVA_ID;
-      guardarAsignaciones();
+  const proyFabBtn = document.getElementById("proy-btn-nuevo");
+  const proyFabMenu = document.getElementById("proy-fab-menu");
+  const proyFabInput = document.getElementById("proy-fab-input-abrir");
+  if (proyFabBtn && proyFabMenu) {
+    proyFabBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const dEsp = document.getElementById("proy-espacio-dropdown");
+      const pop = document.getElementById("proy-account-popup");
+      if (dEsp) dEsp.classList.remove("open");
+      if (pop) pop.hidden = true;
+      proyFabMenu.classList.toggle("open");
+    });
+    proyFabMenu.addEventListener("click", (e) => e.stopPropagation());
+    document.addEventListener("click", () => proyFabMenu.classList.remove("open"));
+    const btnFabNuevo = document.getElementById("proy-fab-menu-nuevo");
+    if (btnFabNuevo) btnFabNuevo.addEventListener("click", async () => {
+      proyFabMenu.classList.remove("open");
+      const nuevoId = await window.crearYAbrirProyectoNuevo();
+      if (CARPETA_ACTIVA_ID && nuevoId) {
+        CARPETA_ASIGNACIONES[nuevoId] = CARPETA_ACTIVA_ID;
+        guardarAsignaciones();
+      }
+      ocultarPantallaProyectos();
+    });
+    const btnFabAbrir = document.getElementById("proy-fab-menu-abrir");
+    if (btnFabAbrir && proyFabInput) {
+      btnFabAbrir.addEventListener("click", () => {
+        proyFabMenu.classList.remove("open");
+        proyFabInput.click();
+      });
+      proyFabInput.addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        e.target.value = "";
+        if (!file) return;
+        if (window.importarProyectoJSON) window.importarProyectoJSON(file);
+        ocultarPantallaProyectos();
+      });
     }
-    ocultarPantallaProyectos();
-  });
+  }
 
   const btnEspacioSelector = document.getElementById("proy-btn-espacio-selector");
   const dropdownEspacio = document.getElementById("proy-espacio-dropdown");
