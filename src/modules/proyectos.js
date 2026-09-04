@@ -94,7 +94,7 @@ function ordenarCarpetas(lista, modo) {
   return copia;
 }
 
-function tarjetaProyectoHTML(id, data, esBorrador, modoManual, esCompartido, candadoAjeno, esDueno) {
+function tarjetaProyectoHTML(id, data, esBorrador, modoManual, esCompartido, candadoAjeno, esDueno, soloLectura) {
   const nombre = esBorrador
     ? (formatearFechaCorta(data.creadoEn || data.guardadoEn) || "Borrador")
     : ((data.projectInfo && data.projectInfo.nombre) || "Sin nombre");
@@ -111,7 +111,7 @@ function tarjetaProyectoHTML(id, data, esBorrador, modoManual, esCompartido, can
       ${arrastrable ? `draggable="true" data-drag-item="1"` : ""}>
       ${arrastrable ? `<svg class="icon proy-card-grip"><use href="#i-move"/></svg>` : ""}
       <div class="proy-card-info">
-        <p class="proy-card-nombre">${escapeHtml(nombre)}${esCompartido ? `<span class="badge-manual">Compartido</span>` : ""}</p>
+        <p class="proy-card-nombre">${escapeHtml(nombre)}${soloLectura ? `<span class="badge-manual">Solo lectura</span>` : (esCompartido ? `<span class="badge-manual">Compartido</span>` : "")}</p>
         <p class="proy-card-sub">${escapeHtml(sub)}</p>
         ${candadoAjeno ? `<p class="proy-card-candado"><svg class="icon"><use href="#i-lock"/></svg>${escapeHtml(candadoAjeno)} está editando</p>` : ""}
       </div>
@@ -470,6 +470,104 @@ function abrirModalMoverDeEspacio(proyectoId) {
   });
 }
 
+function abrirModalRenombrarEspacio(espacioId, nombreActual) {
+  if (!window.fsRenombrarEspacio) {
+    if (window.mostrarToast) mostrarToast("Renombrar todavía no está disponible en esta versión.", "error");
+    return;
+  }
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <p style="font-weight:600;margin:0 0 12px;">Renombrar espacio</p>
+      <input type="text" id="proy-renombrar-espacio-nombre" value="${escapeHtml(nombreActual || "")}" style="width:100%;box-sizing:border-box;height:40px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:var(--fs-base);margin-bottom:4px;" />
+      <p class="auth-error" id="proy-renombrar-espacio-error" style="display:none;"></p>
+      <div class="modal-actions">
+        <button class="secondary" data-act="cancel">Cancelar</button>
+        <button class="primary" data-act="guardar">Guardar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const input = document.getElementById("proy-renombrar-espacio-nombre");
+  input.focus();
+  input.select();
+  const guardar = async () => {
+    const nombre = input.value.trim();
+    const errorEl = document.getElementById("proy-renombrar-espacio-error");
+    if (!nombre) {
+      errorEl.textContent = "Ingresá un nombre.";
+      errorEl.style.display = "block";
+      return;
+    }
+    const btn = overlay.querySelector('[data-act="guardar"]');
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = "Un momento…";
+    try {
+      await window.fsRenombrarEspacio(espacioId, nombre);
+      const e = ESPACIOS.find((x) => x.id === espacioId);
+      if (e) e.nombre = nombre;
+      overlay.remove();
+      renderPantallaProyectos(!!window.PROYECTO_ACTIVO_ID);
+    } catch (e) {
+      errorEl.textContent = e && e.message ? e.message : "No se pudo renombrar. Revisá tu conexión y probá de nuevo.";
+      errorEl.style.display = "block";
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  };
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") guardar(); });
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.dataset.act === "cancel") { overlay.remove(); return; }
+    if (e.target.dataset.act === "guardar") guardar();
+  });
+}
+
+function confirmarBorrarEspacio(espacioId, nombre) {
+  if (!window.fsBorrarEspacio) {
+    if (window.mostrarToast) mostrarToast("Borrar espacio todavía no está disponible en esta versión.", "error");
+    return;
+  }
+  const mensaje = `¿Borrar el espacio "${nombre || "Sin nombre"}"? Sus proyectos NO se borran, vuelven a "Propio" del dueño de cada uno. No se puede deshacer.`;
+  const hacer = async () => {
+    try {
+      await window.fsBorrarEspacio(espacioId);
+      ESPACIOS = ESPACIOS.filter((e) => e.id !== espacioId);
+      ESPACIO_ACTIVO_ID = null;
+      guardarEspacioActivo();
+      renderPantallaProyectos(!!window.PROYECTO_ACTIVO_ID);
+      if (window.mostrarToast) mostrarToast("Espacio borrado.");
+    } catch (e) {
+      if (window.mostrarToast) mostrarToast("No se pudo borrar el espacio: " + (e && e.message ? e.message : "revisá tu conexión."), "error");
+    }
+  };
+  if (window.pedirConfirmacion) pedirConfirmacion(mensaje, hacer);
+  else if (confirm(mensaje)) hacer();
+}
+
+function confirmarSalirDeEspacio(espacioId, nombre) {
+  const user = window.usuarioActual ? window.usuarioActual() : null;
+  if (!user || !window.fsSalirDeEspacio) {
+    if (window.mostrarToast) mostrarToast("Salir de un espacio todavía no está disponible en esta versión.", "error");
+    return;
+  }
+  const mensaje = `¿Salir de "${nombre || "Sin nombre"}"? Vas a dejar de ver sus proyectos hasta que te vuelvan a invitar.`;
+  const hacer = async () => {
+    try {
+      await window.fsSalirDeEspacio(espacioId, user.uid);
+      ESPACIOS = ESPACIOS.filter((e) => e.id !== espacioId);
+      ESPACIO_ACTIVO_ID = null;
+      guardarEspacioActivo();
+      renderPantallaProyectos(!!window.PROYECTO_ACTIVO_ID);
+      if (window.mostrarToast) mostrarToast("Saliste del espacio.");
+    } catch (e) {
+      if (window.mostrarToast) mostrarToast("No se pudo salir del espacio: " + (e && e.message ? e.message : "revisá tu conexión."), "error");
+    }
+  };
+  if (window.pedirConfirmacion) pedirConfirmacion(mensaje, hacer);
+  else if (confirm(mensaje)) hacer();
+}
+
 function dropdownEspacioHTML() {
   const user = window.usuarioActual ? window.usuarioActual() : null;
   if (!user) return "";
@@ -480,9 +578,17 @@ function dropdownEspacioHTML() {
       <svg class="icon"><use href="#i-share"/></svg>${escapeHtml(e.nombre || "Sin nombre")}${ESPACIO_ACTIVO_ID === e.id ? `<svg class="icon icon-check"><use href="#i-check"/></svg>` : ""}
     </button>`).join("");
   const badgeInvitaciones = INVITACIONES_ESPACIO.length ? `<span class="badge-invitacion">${INVITACIONES_ESPACIO.length}</span>` : "";
+  const espacioActivo = ESPACIO_ACTIVO_ID ? ESPACIOS.find((e) => e.id === ESPACIO_ACTIVO_ID) : null;
+  const esCreadorDelActivo = !!(espacioActivo && espacioActivo.creadoPor === user.uid);
   const btnInvitar = ESPACIO_ACTIVO_ID
     ? `<button type="button" class="dropdown-item" id="proy-btn-invitar-espacio"><svg class="icon"><use href="#i-share"/></svg>Invitar a este espacio</button>`
     : "";
+  const btnRenombrar = ESPACIO_ACTIVO_ID
+    ? `<button type="button" class="dropdown-item" id="proy-btn-renombrar-espacio"><svg class="icon"><use href="#i-edit"/></svg>Renombrar espacio</button>`
+    : "";
+  const btnBorrarOSalir = !ESPACIO_ACTIVO_ID ? "" : (esCreadorDelActivo
+    ? `<button type="button" class="dropdown-item" id="proy-btn-borrar-espacio"><svg class="icon"><use href="#i-trash"/></svg>Borrar espacio</button>`
+    : `<button type="button" class="dropdown-item" id="proy-btn-salir-espacio"><svg class="icon"><use href="#i-close"/></svg>Salir del espacio</button>`);
   return `<div class="dropdown-panel" id="proy-espacio-dropdown">
       <p class="dropdown-section-title">Tus espacios</p>
       ${itemPropio}
@@ -491,6 +597,8 @@ function dropdownEspacioHTML() {
       <button type="button" class="dropdown-item" id="proy-btn-crear-espacio"><svg class="icon"><use href="#i-plus"/></svg>Crear espacio</button>
       <button type="button" class="dropdown-item" id="proy-btn-invitaciones-espacio"><svg class="icon"><use href="#i-clipboard-list"/></svg>Invitaciones pendientes${badgeInvitaciones}</button>
       ${btnInvitar}
+      ${btnRenombrar}
+      ${btnBorrarOSalir}
     </div>`;
 }
 
@@ -680,6 +788,11 @@ async function renderPantallaProyectos(permitirCerrar) {
   const candadosAjenosPorProyecto = {};
   const user = window.usuarioActual ? window.usuarioActual() : null;
   const espacioIdConocido = {};
+  // {proyectoId: boolean} — true si YO puedo editar (dueño o editoresUids).
+  // Ver un proyecto por pertenecer a un espacio NO da permiso de edición
+  // por sí solo — eso lo decide el dueño del proyecto puntualmente (ver
+  // detectarSiEsCompartido en archivo-estado-app.js, misma regla).
+  const permisoEdicionConocido = {};
 
   function registrarCandadoAjeno(doc) {
     const c = doc && doc.candado;
@@ -702,6 +815,7 @@ async function renderPantallaProyectos(permitirCerrar) {
       for (const remoto of remotos) {
         idsCompartidos.add(remoto.id);
         espacioIdConocido[remoto.id] = remoto.espacioId || null;
+        permisoEdicionConocido[remoto.id] = true; // llegó acá vía editoresUids array-contains: por definición puede editar
         registrarCandadoAjeno(remoto);
         if (idsLocales.has(remoto.id)) continue;
         if (!remoto.payloadJson) continue;
@@ -735,7 +849,7 @@ async function renderPantallaProyectos(permitirCerrar) {
   if (user && window.fsListarMisProyectosCompartidos) {
     try {
       const mios = await window.fsListarMisProyectosCompartidos(user.uid);
-      for (const doc of mios) { registrarCandadoAjeno(doc); espacioIdConocido[doc.id] = doc.espacioId || null; }
+      for (const doc of mios) { registrarCandadoAjeno(doc); espacioIdConocido[doc.id] = doc.espacioId || null; permisoEdicionConocido[doc.id] = true; }
     } catch (e) {
     }
   }
@@ -747,7 +861,9 @@ async function renderPantallaProyectos(permitirCerrar) {
       for (const doc of deEspacio) {
         espacioIdConocido[doc.id] = ESPACIO_ACTIVO_ID;
         registrarCandadoAjeno(doc);
-        if (!(user && doc.ownerId === user.uid)) idsCompartidos.add(doc.id);
+        const esDuenoDeEste = !!(user && doc.ownerId === user.uid);
+        if (!esDuenoDeEste) idsCompartidos.add(doc.id);
+        permisoEdicionConocido[doc.id] = esDuenoDeEste || (Array.isArray(doc.editoresUids) && !!user && doc.editoresUids.includes(user.uid));
         if (idsLocalesEspacio.has(doc.id)) continue;
         if (!doc.payloadJson) continue;
         try {
@@ -823,7 +939,7 @@ async function renderPantallaProyectos(permitirCerrar) {
        ${controlOrden}
        <div class="proy-lista" id="proy-lista-principal">
          ${carpetasOrdenadas.map(c => tarjetaCarpetaHTML(c, conNombre.filter(p => CARPETA_ASIGNACIONES[p.id] === c.id).length)).join("")}
-         ${proyectosOrdenados.map(p => tarjetaProyectoHTML(p.id, p.data, false, modoManual, idsCompartidos.has(p.id), candadosAjenosPorProyecto[p.id], !idsCompartidos.has(p.id))).join("")}
+         ${proyectosOrdenados.map(p => tarjetaProyectoHTML(p.id, p.data, false, modoManual, idsCompartidos.has(p.id), candadosAjenosPorProyecto[p.id], !idsCompartidos.has(p.id), permisoEdicionConocido[p.id] === false)).join("")}
        </div>`
     : "";
   const btnNuevaCarpeta = puedeCrearSubcarpeta
@@ -1030,6 +1146,24 @@ async function renderPantallaProyectos(permitirCerrar) {
       dropdownEspacio.classList.remove("open");
       const activo = ESPACIOS.find((e) => e.id === ESPACIO_ACTIVO_ID);
       abrirModalInvitarEspacio(ESPACIO_ACTIVO_ID, activo && activo.nombre);
+    });
+    const btnRenombrarEspacio = document.getElementById("proy-btn-renombrar-espacio");
+    if (btnRenombrarEspacio) btnRenombrarEspacio.addEventListener("click", () => {
+      dropdownEspacio.classList.remove("open");
+      const activo = ESPACIOS.find((e) => e.id === ESPACIO_ACTIVO_ID);
+      abrirModalRenombrarEspacio(ESPACIO_ACTIVO_ID, activo && activo.nombre);
+    });
+    const btnBorrarEspacio = document.getElementById("proy-btn-borrar-espacio");
+    if (btnBorrarEspacio) btnBorrarEspacio.addEventListener("click", () => {
+      dropdownEspacio.classList.remove("open");
+      const activo = ESPACIOS.find((e) => e.id === ESPACIO_ACTIVO_ID);
+      confirmarBorrarEspacio(ESPACIO_ACTIVO_ID, activo && activo.nombre);
+    });
+    const btnSalirEspacio = document.getElementById("proy-btn-salir-espacio");
+    if (btnSalirEspacio) btnSalirEspacio.addEventListener("click", () => {
+      dropdownEspacio.classList.remove("open");
+      const activo = ESPACIOS.find((e) => e.id === ESPACIO_ACTIVO_ID);
+      confirmarSalirDeEspacio(ESPACIO_ACTIVO_ID, activo && activo.nombre);
     });
   }
 
