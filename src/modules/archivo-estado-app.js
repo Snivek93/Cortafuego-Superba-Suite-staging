@@ -363,7 +363,7 @@ function avisarConflictoAlReconectar(remoto) {
   if (avisandoConflicto) return;
   avisandoConflicto = true;
   window.pedirEleccion(
-    "Otra persona guardó cambios en este proyecto mientras estabas sin conexión. No se puede combinar automáticamente. Elegi cu00f3mo seguir.",
+    "Otra persona guardó cambios en este proyecto mientras estabas sin conexión. No se puede combinar automáticamente. Elegí cómo seguir.",
     [
       { label: "Traer esos cambios (descarta lo mío)", act: "traer", clase: "danger" },
       { label: "Guardar lo mío como copia aparte", act: "copia", clase: "primary" },
@@ -646,7 +646,18 @@ async function detectarSiEsCompartido(id) {
         PROYECTO_ACTIVO_FS_VERSION = remoto.version;
       }
       if (PROYECTO_ACTIVO_ID !== id) return;
-      if (PROYECTO_ACTIVO_MULTI_EDITOR) {
+      // Permiso real de edición: dueño, o editor invitado explícitamente
+      // (editoresUids). Ver un proyecto por pertenecer a un espacio de
+      // trabajo NO da permiso de edición por sí solo — eso lo sigue
+      // decidiendo el dueño del proyecto, puntualmente (fsCompartirProyecto).
+      // Sin este permiso, el proyecto se abre en solo lectura PERMANENTE,
+      // sin importar si hay candado libre o no — no tiene sentido pedir un
+      // candado que las reglas de Firestore igual van a rechazar al guardar.
+      const tieneAccesoEdicion = remoto.ownerId === user.uid
+        || (Array.isArray(remoto.editoresUids) && remoto.editoresUids.includes(user.uid));
+      if (!tieneAccesoEdicion) {
+        aplicarModoSoloLectura(true, null, "permiso");
+      } else if (PROYECTO_ACTIVO_MULTI_EDITOR) {
         await tomarCandadoSiCorresponde(id);
         if (PROYECTO_ACTIVO_ID === id) activarListenerProyectoActivo(id);
       }
@@ -673,7 +684,7 @@ async function tomarCandadoSiCorresponde(id) {
   }
 }
 
-function aplicarModoSoloLectura(activo, ocupadoPor) {
+function aplicarModoSoloLectura(activo, ocupadoPor, motivo) {
   PROYECTO_ACTIVO_SOLO_LECTURA = !!activo;
   const main = document.querySelector("main");
   const banner = document.getElementById("solo-lectura-banner");
@@ -681,9 +692,54 @@ function aplicarModoSoloLectura(activo, ocupadoPor) {
   if (main) main.classList.toggle("solo-lectura", PROYECTO_ACTIVO_SOLO_LECTURA);
   if (banner) banner.style.display = PROYECTO_ACTIVO_SOLO_LECTURA ? "flex" : "none";
   if (texto && PROYECTO_ACTIVO_SOLO_LECTURA) {
-    texto.textContent = `Solo lectura — ${ocupadoPor || "otra persona"} está editando`;
+    texto.textContent = motivo === "permiso"
+      ? "Solo lectura — no tenés permiso de edición en este espacio"
+      : `Solo lectura — ${ocupadoPor || "otra persona"} está editando`;
+  }
+  // Botón "Hacer copia editable": solo tiene sentido cuando el motivo es
+  // falta de permiso (permanente) — si es candado ajeno (temporal), el
+  // proyecto vuelve a ser editable solo cuando se libere, no tiene caso
+  // ofrecer una copia aparte para eso.
+  if (banner) {
+    let btnCopia = document.getElementById("btn-solo-lectura-copia");
+    if (PROYECTO_ACTIVO_SOLO_LECTURA && motivo === "permiso") {
+      if (!btnCopia) {
+        btnCopia = document.createElement("button");
+        btnCopia.type = "button";
+        btnCopia.id = "btn-solo-lectura-copia";
+        btnCopia.className = "solo-lectura-banner-btn";
+        btnCopia.textContent = "Hacer copia editable";
+        btnCopia.addEventListener("click", hacerCopiaLocalEditable);
+        banner.appendChild(btnCopia);
+      }
+    } else if (btnCopia) {
+      btnCopia.remove();
+    }
   }
 }
+
+// Copia local del proyecto activo (que se está viendo en solo lectura por
+// falta de permiso) como un proyecto nuevo, propio y editable — no toca el
+// original ni requiere permiso de nadie, porque nace sin id compartido ni
+// respaldo remoto todavía (se sincroniza como cualquier proyecto nuevo la
+// próxima vez que se abra, con el dueño de la copia como owner).
+async function hacerCopiaLocalEditable() {
+  const nuevoId = "p_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
+  const payload = datosProyectoActual();
+  payload.id = nuevoId;
+  payload.guardadoEn = new Date().toISOString();
+  payload.creadoEn = payload.guardadoEn;
+  payload.projectInfo = Object.assign({}, payload.projectInfo, {
+    nombre: "Copia de " + ((payload.projectInfo && payload.projectInfo.nombre) || "proyecto"),
+  });
+  try {
+    await idbGuardarProyecto(nuevoId, payload);
+    mostrarToast(`Copia editable creada: "${payload.projectInfo.nombre}". La vas a ver en Propio.`);
+  } catch (e) {
+    mostrarToast("No se pudo crear la copia: " + e.message, "error");
+  }
+}
+window.hacerCopiaLocalEditable = hacerCopiaLocalEditable;
 
 async function soltarCandadoActivoSiHaceFalta() {
   aplicarModoSoloLectura(false);
