@@ -1,8 +1,6 @@
 // ============================================================================
 // archivo-estado-app.js — encapsulado en IIFE (sin exponer todo a window; ver export list abajo)
 // ============================================================================
-// PROYECTO_ACTIVO_ID / PROYECTO_ACTIVO_CREADO_EN se declaran fuera del IIFE:
-// proyectos.js los reasigna directamente al abrir/crear/borrar un proyecto.
 var PROYECTO_ACTIVO_ID = null;
 var PROYECTO_ACTIVO_CREADO_EN = null;
 var PROYECTO_ACTIVO_COMPARTIDO = false;
@@ -365,7 +363,7 @@ function avisarConflictoAlReconectar(remoto) {
   if (avisandoConflicto) return;
   avisandoConflicto = true;
   window.pedirEleccion(
-    "Otra persona guardó cambios en este proyecto mientras estabas sin conexión. No se puede combinar automáticamente. Elegi´ cómo seguir.",
+    "Otra persona guardó cambios en este proyecto mientras estabas sin conexión. No se puede combinar automáticamente. Elegí cómo seguir.",
     [
       { label: "Traer esos cambios (descarta lo mío)", act: "traer", clase: "danger" },
       { label: "Guardar lo mío como copia aparte", act: "copia", clase: "primary" },
