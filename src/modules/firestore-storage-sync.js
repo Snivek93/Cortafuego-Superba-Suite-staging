@@ -127,8 +127,26 @@ async function fsDescargarImagenesComoJson(imagenesUrls) {
   return JSON.stringify(imagenes);
 }
 
+// Borra TODAS las fotos de un proyecto en Storage (carpeta
+// proyectos/{proyectoId}/) — se usa junto con fsBorrarProyectoDeNube al
+// borrar un proyecto propio. Carpeta vacía o inexistente (proyecto sin
+// fotos, o ya borrado antes) no es un error, sigue igual.
+async function fsBorrarFotosDeProyecto(proyectoId) {
+  try {
+    const carpeta = storage().ref("proyectos/" + proyectoId);
+    const listado = await carpeta.listAll();
+    await Promise.all(listado.items.map((item) => item.delete().catch(() => {})));
+  } catch (e) {
+    // Sin señal, o la carpeta nunca existió — no bloquea el borrado del
+    // documento, que es lo importante; las fotos quedan huérfanas en
+    // Storage pero sin nada que las liste ni las cobre de forma relevante
+    // a este volumen.
+  }
+}
+
 window.fsSubirImagenesFaltantes = fsSubirImagenesFaltantes;
 window.fsDescargarImagenesComoJson = fsDescargarImagenesComoJson;
+window.fsBorrarFotosDeProyecto = fsBorrarFotosDeProyecto;
 // Exportado aparte para poder probar el hash sin Firebase real.
 window.hashLivianoImagen = hashLiviano;
 

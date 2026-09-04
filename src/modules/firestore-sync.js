@@ -20,17 +20,40 @@
 // firebase-app-compat.js y firebase-auth-compat.js, ya presentes) y que
 // firebase-auth.js haya corrido antes (usa el mismo firebase.initializeApp).
 //
-// Documentos Firestore:
-//   proyectos/{proyectoId}
-//     ownerId, ownerEmail, nombre
+// Documentos Firestore (esquema liviano/pesado — 03/09/2026):
+//   proyectos/{proyectoId}                    ← LIVIANO, esto es lo que se
+//                                                lee al LISTAR proyectos
+//     ownerId, ownerEmail, nombre, cliente, fecha
+//     espacioId: string | null        // null = "Propio" del owner (privado)
 //     editoresUids: [uid, ...]        // quién puede pedir el candado además del owner
 //     candado: { uid, nombre, desde } | null
 //     versionSync: number             // sube 1 en cada fsSubirCambios exitoso
+//     tieneContenido: boolean         // false hasta la primera subida real
+//     actualizadoEn: timestamp servidor
+//   proyectos/{proyectoId}/contenido/data     ← PESADO, solo se lee al ABRIR
 //     payloadJson: string             // datosProyectoActual() sin imágenes, como JSON
 //     imagenesUrls: { key: url }      // fotos/planos subidos a Storage (opcional)
-//     actualizadoEn: timestamp servidor
+//     versionSync: number             // copia de la del liviano, para que el
+//                                        listener en vivo (fsEscucharProyecto)
+//                                        tenga todo en un solo snapshot
 //   invitaciones/{emailSanitizado}
 //     pendientes: [{ proyectoId, nombre, rol, invitadoPor }]
+//   espacios/{espacioId}
+//     nombre, miembrosUids: [uid, ...], creadoPor, creadoEn
+//   invitacionesEspacio/{emailSanitizado}
+//     pendientes: [{ espacioId, nombreEspacio, invitadoPor }]
+//     — la aceptación real (agregar el uid a miembrosUids) la hace la Cloud
+//       Function aceptarInvitacionesEspacio (functions/index.js), no el
+//       cliente: mismo problema huevo-y-gallina que editoresUids, resuelto
+//       de raíz esta vez en vez de otro parche de reglas.
+//
+// MIGRACIÓN: los proyectos creados antes de esta partición (ej. Prueba 2,
+// Demasa, UCR Golfito) tienen el contenido embebido directo en el documento
+// liviano (payloadJson/imagenesUrls ahí mismo). Se detectan por tener el
+// campo payloadJson presente, se leen igual sin romper nada, y se migran
+// solos a la subcolección `contenido` la próxima vez que alguien guarda
+// cambios sobre ellos (ver fsSubirCambios) — no hace falta correr nada a
+// mano ni bloquear la apertura mientras tanto.
 // ============================================================================
 (function () {
 
@@ -56,24 +79,30 @@ function sanitizarEmailComoId(email) {
 // ---------------------------------------------------------------------------
 // Metadata del proyecto — crear/asegurar que exista antes de compartir
 // ---------------------------------------------------------------------------
-async function fsAsegurarProyecto(proyectoId, { nombre, ownerId, ownerEmail }) {
+async function fsAsegurarProyecto(proyectoId, { nombre, cliente, fecha, ownerId, ownerEmail, espacioId }) {
   const ref = db().collection("proyectos").doc(proyectoId);
   const snap = await ref.get();
   if (snap.exists) {
     // Ya existe (ej. otro dispositivo del mismo owner lo creó primero) —
-    // solo refresca el nombre para que las listas de "compartido conmigo"
-    // no queden con un nombre viejo.
-    await ref.update({ nombre: nombre || "" });
+    // solo refresca metadata liviana para que las tarjetas/listas de
+    // "compartido conmigo" no queden con nombre/cliente/fecha viejos.
+    // espacioId NUNCA se toca acá: mover un proyecto de espacio es una
+    // acción explícita aparte (ver diseño de Espacios de Trabajo), no un
+    // efecto colateral de abrir el proyecto.
+    await ref.update({ nombre: nombre || "", cliente: cliente || "", fecha: fecha || "" });
     return;
   }
   await ref.set({
     ownerId,
     ownerEmail: ownerEmail || "",
     nombre: nombre || "",
+    cliente: cliente || "",
+    fecha: fecha || "",
+    espacioId: espacioId !== undefined ? espacioId : null, // null = "Propio" del owner
     editoresUids: [],
     candado: null,
     versionSync: 0,
-    payloadJson: null,
+    tieneContenido: false,
     actualizadoEn: firebase.firestore.FieldValue.serverTimestamp(),
   });
 }
@@ -160,9 +189,87 @@ async function fsListarMisProyectosCompartidos(uid) {
   return q.docs.map((d) => Object.assign({ id: d.id }, d.data()));
 }
 
+// Borra el proyecto de Firestore por completo (documento liviano +
+// subcolección de contenido). Las fotos en Storage se borran aparte, desde
+// firestore-storage-sync.js (fsBorrarFotosDeProyecto) — mismo criterio que
+// ya separa "documento" de "fotos" en todo este módulo.
+//
+// SOLO para cuando quien borra es el DUEÑO: las reglas de Firestore no
+// dejan borrar el documento a nadie más (ver `allow delete`), así que
+// llamar esto sin ser el owner falla del lado del servidor. Si es un
+// proyecto compartido CON vos (no tuyo), usar fsQuitarAcceso en cambio —
+// eso te saca a vos, no borra el proyecto para el dueño.
+async function fsBorrarProyectoDeNube(proyectoId) {
+  const ref = db().collection("proyectos").doc(proyectoId);
+  // Se borra primero el contenido (subcolección) y recién después el
+  // documento liviano: si se corta la señal a mitad de camino, mejor un
+  // documento liviano huérfano (se puede reintentar borrar) que contenido
+  // huérfano sin nada que lo referencie ni permita identificarlo.
+  try { await ref.collection("contenido").doc("data").delete(); } catch (e) { /* puede no existir, no pasa nada */ }
+  await ref.delete();
+}
+
 // ---------------------------------------------------------------------------
-// Candado de edición
+// Espacios de trabajo — capa de datos. Diseño cerrado con Kevin 03/09/2026,
+// ver sección "🏢 ESPACIOS DE TRABAJO" en la guía de continuidad. La UI
+// (selector, invitar/unirse) todavía no existe — esto es solo la base
+// técnica, para poder probarla sola con Playwright antes de construir
+// encima.
 // ---------------------------------------------------------------------------
+async function fsCrearEspacio(nombre, uid) {
+  const ref = await db().collection("espacios").add({
+    nombre: nombre || "",
+    miembrosUids: [uid],
+    creadoPor: uid,
+    creadoEn: firebase.firestore.FieldValue.serverTimestamp(),
+  });
+  return ref.id;
+}
+
+async function fsListarMisEspacios(uid) {
+  const q = await db().collection("espacios").where("miembrosUids", "array-contains", uid).get();
+  return q.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+}
+
+// Proyectos de un espacio CON NOMBRE (Superba Ingeniería, Superba SC…). Para
+// "Propio" no se usa esto — ahí se filtra directo por ownerId + espacioId
+// == null, ver proyectos.js, porque es privado y no depende de membresía.
+// Solo lee el documento LIVIANO de cada proyecto — barato, pensado para
+// listar tarjetas, no para abrir contenido.
+async function fsListarProyectosDeEspacio(espacioId) {
+  const q = await db().collection("proyectos").where("espacioId", "==", espacioId).get();
+  return q.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+}
+
+// Mismo patrón que fsCompartirProyecto: siempre pasa por una colección de
+// invitaciones pendientes, exista o no la cuenta del destinatario todavía.
+async function fsInvitarAEspacio(espacioId, nombreEspacio, email, invitadoPorEmail) {
+  const emailId = sanitizarEmailComoId(email);
+  const ref = db().collection("invitacionesEspacio").doc(emailId);
+  await db().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const pendientes = snap.exists ? (snap.data().pendientes || []) : [];
+    const yaEstaba = pendientes.some((p) => p.espacioId === espacioId);
+    if (yaEstaba) return; // idempotente: invitar dos veces no duplica
+    pendientes.push({ espacioId, nombreEspacio: nombreEspacio || "", invitadoPor: invitadoPorEmail || "" });
+    tx.set(ref, { pendientes }, { merge: true });
+  });
+}
+
+// Llama a la Cloud Function que de verdad agrega el uid a miembrosUids (ver
+// functions/index.js) — el cliente no puede hacerlo solo, no controla ese
+// array (mismo problema huevo-y-gallina que editoresUids en proyectos,
+// resuelto acá con Cloud Function en vez de otro parche de reglas).
+// Requiere firebase-functions-compat.js cargado en index.html.
+async function fsAceptarInvitacionesEspacio() {
+  if (!firebase.functions) {
+    console.error("firebase-functions-compat.js no está cargado — no se pueden aceptar invitaciones a espacios.");
+    return [];
+  }
+  const llamar = firebase.functions().httpsCallable("aceptarInvitacionesEspacio");
+  const r = await llamar();
+  return (r && r.data && r.data.aceptadas) || [];
+}
 function candadoEstaVencido(candado) {
   if (!candado || !candado.desde) return true;
   // candado.desde puede venir como Firestore Timestamp (tiene .toMillis) o
@@ -213,19 +320,37 @@ function fsEscucharCandado(proyectoId, callback) {
   );
 }
 
-// Suscripción en vivo al documento COMPLETO — para que quien tiene el
-// proyecto abierto (viéndolo, no necesariamente editándolo) vea los cambios
-// de otra persona en segundos, sin tener que cerrar y volver a abrir. Un
-// solo listener a la vez (el proyecto abierto), no uno por tarjeta de la
-// lista — ver fsEscucharCandado arriba para el porqué de esa distinción.
-// callback recibe (data, metadata); metadata.hasPendingWrites permite
-// distinguir el eco optimista de una escritura propia (todavía no
-// confirmada por el servidor) de un cambio que realmente vino de afuera.
+// Suscripción en vivo al CONTENIDO — para que quien tiene el proyecto
+// abierto (viéndolo, no necesariamente editándolo) vea los cambios de otra
+// persona en segundos, sin tener que cerrar y volver a abrir. Un solo
+// listener a la vez (el proyecto abierto), no uno por tarjeta de la lista —
+// ver fsEscucharCandado arriba para el porqué de esa distinción.
+// callback recibe (data, metadata) con data.payloadJson/versionSync/
+// imagenesUrls — MISMO contrato de antes de la partición liviano/pesado, así
+// que quien llama (archivo-estado-app.js) no necesita ningún cambio.
+//
+// El contenido en vivo puede estar en dos lugares según el proyecto ya se
+// haya migrado o no (ver comentario de esquema arriba): se revisa una vez
+// al suscribirse cuál de los dos corresponde. Si el proyecto migra a mitad
+// de una sesión con el visor abierto (alguien más lo edita justo en ese
+// instante) el listener sigue apuntando al lugar viejo hasta la próxima
+// apertura — caso borde aceptado, no vale la complejidad de un listener que
+// se reapunte solo.
 function fsEscucharProyecto(proyectoId, callback) {
-  return db().collection("proyectos").doc(proyectoId).onSnapshot(
-    (snap) => { if (snap.exists) callback(snap.data(), snap.metadata); },
-    (err) => console.error("Error escuchando proyecto", proyectoId, err)
-  );
+  const ref = db().collection("proyectos").doc(proyectoId);
+  const contRef = ref.collection("contenido").doc("data");
+  let unsub = null;
+  let cancelado = false;
+  ref.get().then((snap) => {
+    if (cancelado) return;
+    const esquemaViejo = snap.exists && Object.prototype.hasOwnProperty.call(snap.data(), "payloadJson");
+    const objetivo = esquemaViejo ? ref : contRef;
+    unsub = objetivo.onSnapshot(
+      (s) => { if (s.exists) callback(s.data(), s.metadata); },
+      (err) => console.error("Error escuchando proyecto", proyectoId, err)
+    );
+  }).catch((err) => console.error("No se pudo determinar el esquema para escuchar", proyectoId, err));
+  return () => { cancelado = true; if (unsub) unsub(); };
 }
 
 // ---------------------------------------------------------------------------
@@ -246,46 +371,69 @@ function fsEscucharProyecto(proyectoId, callback) {
 //     archivo-guardar-cargar.js, mismo patrón que "Abrir…" con id repetido).
 async function fsSubirCambios(proyectoId, payloadJson, versionEsperada, imagenesUrls) {
   const ref = db().collection("proyectos").doc(proyectoId);
+  const contRef = ref.collection("contenido").doc("data");
   return db().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) return { ok: false, conflicto: false, error: "El proyecto no existe en Firestore." };
-    const versionRemota = snap.data().versionSync || 0;
+    const data = snap.data();
+    // Firestore exige TODAS las lecturas antes de cualquier escritura en una
+    // transacción — por eso este get() va acá aunque el documento sea viejo
+    // (sin migrar) y todavía no tenga subcolección `contenido`: leerla igual
+    // no falla, solo devuelve exists:false.
+    const contSnap = await tx.get(contRef);
+    const versionRemota = data.versionSync || 0;
     if (versionEsperada !== null && versionEsperada !== undefined && versionRemota !== versionEsperada) {
       return { ok: false, conflicto: true, versionRemota };
     }
     const versionNueva = versionRemota + 1;
-    const cambios = {
-      payloadJson,
+    // Fotos previas: de la subcolección si el documento ya está en el
+    // esquema nuevo, o del documento liviano si es un proyecto de antes de
+    // la partición (03/09/2026) que todavía no se migró — MEZCLA, no
+    // reemplazo, mismo motivo de siempre: una foto pendiente de una subida
+    // anterior no debe desaparecer porque esta subida no la incluyó.
+    const urlsPrevias = contSnap.exists ? (contSnap.data().imagenesUrls || {}) : (data.imagenesUrls || {});
+    const urlsFinal = (imagenesUrls && Object.keys(imagenesUrls).length > 0)
+      ? Object.assign({}, urlsPrevias, imagenesUrls)
+      : urlsPrevias;
+    tx.set(contRef, { payloadJson, versionSync: versionNueva, imagenesUrls: urlsFinal });
+    tx.update(ref, {
       versionSync: versionNueva,
+      tieneContenido: true,
       actualizadoEn: firebase.firestore.FieldValue.serverTimestamp(),
-    };
-    // imagenesUrls es opcional: solo se manda cuando hubo fotos que subir o
-    // que ya estaban en caché (ver fsSubirImagenesFaltantes en
-    // firestore-storage-sync.js). Si el proyecto no tiene fotos, se omite
-    // el campo en vez de escribir un objeto vacío innecesariamente.
-    //
-    // MEZCLA, no reemplazo: si esta subida trae fotos nuevas pero ALGUNA
-    // foto de una subida anterior falló y quedó pendiente (ver comentario
-    // en fsSubirImagenesFaltantes), un reemplazo completo del campo la
-    // desaparecería de Firestore aunque siga bien subida. Bug real
-    // encontrado esta sesión: una foto que fallaba al subir dejaba el
-    // informe con la foto en blanco para siempre, sin aviso.
-    if (imagenesUrls && Object.keys(imagenesUrls).length > 0) {
-      cambios.imagenesUrls = Object.assign({}, snap.data().imagenesUrls || {}, imagenesUrls);
-    }
-    tx.update(ref, cambios);
+      // Migración a la subcolección — borrar un campo que ya no existe (un
+      // documento que ya estaba en el esquema nuevo) no es un error, así
+      // que esto es seguro de mandar siempre, migre o no migre esta vez.
+      payloadJson: firebase.firestore.FieldValue.delete(),
+      imagenesUrls: firebase.firestore.FieldValue.delete(),
+    });
     return { ok: true, version: versionNueva };
   });
 }
 
 async function fsDescargarUltimaVersion(proyectoId) {
-  const snap = await db().collection("proyectos").doc(proyectoId).get();
+  const ref = db().collection("proyectos").doc(proyectoId);
+  const snap = await ref.get();
   if (!snap.exists) return null;
   const data = snap.data();
+  let payloadJson = null, imagenesUrls = {};
+  if (Object.prototype.hasOwnProperty.call(data, "payloadJson")) {
+    // Esquema viejo (de antes de la partición liviano/pesado): el contenido
+    // vive directo en este documento. Se lee tal cual — la migración real
+    // (mover a `contenido/data`) ocurre sola en el próximo fsSubirCambios de
+    // este proyecto, no hace falta duplicar esa lógica en una lectura.
+    payloadJson = data.payloadJson || null;
+    imagenesUrls = data.imagenesUrls || {};
+  } else if (data.tieneContenido) {
+    const contSnap = await ref.collection("contenido").doc("data").get();
+    if (contSnap.exists) {
+      payloadJson = contSnap.data().payloadJson || null;
+      imagenesUrls = contSnap.data().imagenesUrls || {};
+    }
+  }
   return {
-    payloadJson: data.payloadJson,
+    payloadJson,
     version: data.versionSync || 0,
-    imagenesUrls: data.imagenesUrls || {},
+    imagenesUrls,
     // editoresUids/ownerId: para que quien llama pueda distinguir un
     // respaldo privado (nadie más en editoresUids) de un proyecto
     // realmente compartido — el candado y el listener en vivo solo tienen
@@ -301,6 +449,12 @@ window.fsResolverInvitacionesPendientes = fsResolverInvitacionesPendientes;
 window.fsQuitarAcceso = fsQuitarAcceso;
 window.fsListarProyectosCompartidosConmigo = fsListarProyectosCompartidosConmigo;
 window.fsListarMisProyectosCompartidos = fsListarMisProyectosCompartidos;
+window.fsBorrarProyectoDeNube = fsBorrarProyectoDeNube;
+window.fsCrearEspacio = fsCrearEspacio;
+window.fsListarMisEspacios = fsListarMisEspacios;
+window.fsListarProyectosDeEspacio = fsListarProyectosDeEspacio;
+window.fsInvitarAEspacio = fsInvitarAEspacio;
+window.fsAceptarInvitacionesEspacio = fsAceptarInvitacionesEspacio;
 window.fsTomarCandado = fsTomarCandado;
 window.fsSoltarCandado = fsSoltarCandado;
 window.fsEscucharCandado = fsEscucharCandado;

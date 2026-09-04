@@ -854,6 +854,8 @@ async function detectarSiEsCompartido(id) {
       try {
         await window.fsAsegurarProyecto(id, {
           nombre: (typeof PROJECT_INFO !== "undefined" && PROJECT_INFO && PROJECT_INFO.nombre) || "",
+          cliente: (typeof PROJECT_INFO !== "undefined" && PROJECT_INFO && PROJECT_INFO.cliente) || "",
+          fecha: (typeof PROJECT_INFO !== "undefined" && PROJECT_INFO && PROJECT_INFO.fecha) || "",
           ownerId: user.uid,
           ownerEmail: user.email || "",
         });

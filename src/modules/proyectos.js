@@ -117,7 +117,7 @@ function tarjetaProyectoHTML(id, data, esBorrador, modoManual, esCompartido, can
       <div class="proy-card-right">
         ${!esBorrador ? `<button type="button" class="proy-card-compartir" data-id="${escapeHtml(id)}" title="Compartir" aria-label="Compartir"><svg class="icon"><use href="#i-share"/></svg></button>` : ""}
         ${!esBorrador ? `<button type="button" class="proy-card-mover" data-id="${escapeHtml(id)}" title="Mover a carpeta" aria-label="Mover a carpeta"><svg class="icon"><use href="#i-folder"/></svg></button>` : ""}
-        <button type="button" class="proy-card-borrar" data-id="${escapeHtml(id)}" title="Borrar proyecto" aria-label="Borrar proyecto">
+        <button type="button" class="proy-card-borrar" data-id="${escapeHtml(id)}" data-propio="${esCompartido ? "0" : "1"}" title="Borrar proyecto" aria-label="Borrar proyecto">
           <svg class="icon"><use href="#i-trash"/></svg>
         </button>
         <svg class="icon proy-card-chevron"><use href="#i-chevron-right"/></svg>
@@ -289,7 +289,7 @@ function abrirModalMoverACarpeta(proyectoId) {
 // (si es la primera vez que se comparte) e invita por correo. Requiere
 // conexión — sin señal simplemente avisa y no rompe nada local.
 // ---------------------------------------------------------------------------
-function abrirModalCompartir(proyectoId, nombreProyecto) {
+function abrirModalCompartir(proyectoId, nombreProyecto, clienteProyecto, fechaProyecto) {
   if (!window.fsCompartirProyecto || !window.fsAsegurarProyecto) {
     if (window.mostrarToast) mostrarToast("Compartir todavía no está disponible en esta versión.", "error");
     return;
@@ -331,7 +331,7 @@ function abrirModalCompartir(proyectoId, nombreProyecto) {
     const textoOriginal = btn.textContent;
     btn.textContent = "Un momento…";
     try {
-      await window.fsAsegurarProyecto(proyectoId, { nombre: nombreProyecto, ownerId: user.uid, ownerEmail: user.email || "" });
+      await window.fsAsegurarProyecto(proyectoId, { nombre: nombreProyecto, cliente: clienteProyecto, fecha: fechaProyecto, ownerId: user.uid, ownerEmail: user.email || "" });
       await window.fsCompartirProyecto(proyectoId, nombreProyecto, email, "editor", user.email || "");
       overlay.remove();
       if (window.mostrarToast) mostrarToast(`Invitación enviada a ${email}. Va a ver el proyecto en su próximo inicio de sesión.`);
@@ -684,6 +684,7 @@ async function renderPantallaProyectos(permitirCerrar) {
       e.stopPropagation();
       const id = btn.getAttribute("data-id");
       const esCarpeta = btn.getAttribute("data-tipo") === "carpeta";
+      const esPropio = btn.getAttribute("data-propio") !== "0"; // default true (borradores, sin dato remoto todavía)
       const hacerBorrado = async () => {
         if (esCarpeta) {
           CARPETAS = CARPETAS
@@ -698,6 +699,31 @@ async function renderPantallaProyectos(permitirCerrar) {
         try { await window.idbBorrarProyecto(id); } catch (err) { console.error("No se pudo borrar el proyecto:", err); }
         delete CARPETA_ASIGNACIONES[id];
         guardarAsignaciones();
+        // Nube: el borrado local SIEMPRE pasa (ver arriba), esto es
+        // best-effort — sin señal, el documento remoto queda y se
+        // reintenta la próxima vez que se toque este proyecto desde algún
+        // dispositivo con conexión. No bloquea ni retrasa el borrado local.
+        const user = window.usuarioActual ? window.usuarioActual() : null;
+        if (user) {
+          try {
+            if (esPropio) {
+              // Dueño: borra el documento entero — desaparece de todos los
+              // dispositivos, no solo de este (decisión de Kevin,
+              // 03/09/2026).
+              if (window.fsBorrarProyectoDeNube) await window.fsBorrarProyectoDeNube(id);
+              if (window.fsBorrarFotosDeProyecto) await window.fsBorrarFotosDeProyecto(id);
+            } else {
+              // Compartido conmigo: NO se borra para el dueño, solo se
+              // quita el propio acceso — si no, este proyecto iba a
+              // reaparecer solo la próxima vez que se liste "compartido
+              // conmigo" (sigue en editoresUids).
+              if (window.fsQuitarAcceso) await window.fsQuitarAcceso(id, user.uid);
+            }
+          } catch (err) {
+            console.error("No se pudo borrar/quitar acceso en la nube:", err);
+            if (window.mostrarToast) mostrarToast("Se borró en este dispositivo. Revisá tu conexión: puede tardar en desaparecer de la nube.", "error");
+          }
+        }
         if (id === window.PROYECTO_ACTIVO_ID) {
           window.PROYECTO_ACTIVO_ID = null;
           if (typeof ROWS !== "undefined") {
@@ -708,7 +734,11 @@ async function renderPantallaProyectos(permitirCerrar) {
           renderPantallaProyectos(permitirCerrar);
         }
       };
-      const mensaje = esCarpeta ? "¿Borrar esta carpeta? Los proyectos y subcarpetas que tenga adentro NO se borran, vuelven a la lista general." : "¿Borrar este proyecto? No se puede deshacer.";
+      const mensaje = esCarpeta
+        ? "¿Borrar esta carpeta? Los proyectos y subcarpetas que tenga adentro NO se borran, vuelven a la lista general."
+        : (esPropio
+            ? "¿Borrar este proyecto? Se borra también de la nube y de todos tus dispositivos. No se puede deshacer."
+            : "Vas a dejar de ver este proyecto (lo compartieron con vos). La persona dueña lo conserva. ¿Continuar?");
       if (window.pedirConfirmacion) pedirConfirmacion(mensaje, hacerBorrado);
       else if (confirm(mensaje)) hacerBorrado();
     });
@@ -728,8 +758,8 @@ async function renderPantallaProyectos(permitirCerrar) {
       e.stopPropagation();
       const id = btn.getAttribute("data-id");
       const proyecto = conNombre.find((p) => p.id === id);
-      const nombreProyecto = proyecto && proyecto.data.projectInfo ? proyecto.data.projectInfo.nombre : "";
-      abrirModalCompartir(id, nombreProyecto);
+      const info = proyecto && proyecto.data.projectInfo;
+      abrirModalCompartir(id, info && info.nombre, info && info.cliente, info && info.fecha);
     });
   });
 
