@@ -964,7 +964,12 @@ main.solo-lectura .tab-btn { opacity: 1; pointer-events: auto; }
 .proy-vacio { display: flex; flex-direction: column; align-items: center; text-align: center; color: var(--text-muted); font-size: var(--fs-sm); padding: 60px 20px; gap: 12px; }
 .proy-vacio-icono { width: 40px; height: 40px; margin-right: 0; color: var(--border); }
 
-.proy-fab { position: fixed; bottom: 24px; right: 24px; width: 56px; height: 56px; border-radius: 50%; background: var(--hilti-red); border: none; color: #ffffff; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(226,0,26,0.4); cursor: pointer; z-index: 8001; }
+.proy-fab-wrap { position: fixed; bottom: 24px; right: 24px; z-index: 8001; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+.proy-fab-menu { display: none; flex-direction: column; gap: 4px; background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; box-shadow: 0 10px 28px rgba(0,0,0,0.16); min-width: 190px; }
+.proy-fab-menu.open { display: flex; }
+.proy-fab-menu-item { display: flex; align-items: center; gap: 10px; border: none; background: transparent; padding: 10px 12px; border-radius: var(--radius-sm); font-size: var(--fs-base); cursor: pointer; color: var(--ink); text-align: left; width: 100%; }
+@media (hover: hover) and (pointer: fine) { .proy-fab-menu-item:hover { background: var(--grey-1); } }
+.proy-fab { width: 56px; height: 56px; border-radius: 50%; background: var(--hilti-red); border: none; color: #ffffff; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(226,0,26,0.4); cursor: pointer; }
 .proy-fab .icon { width: 24px; height: 24px; margin-right: 0; }
 @media (hover: hover) and (pointer: fine) { .proy-fab:hover { background: var(--hilti-red-dark); } }
 
