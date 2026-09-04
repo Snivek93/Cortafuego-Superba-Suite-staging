@@ -204,6 +204,36 @@ async function fsListarInvitacionesPendientes(email) {
   return snap.data().pendientes || [];
 }
 
+// Renombra un espacio — cualquier miembro puede (mismo criterio simple que
+// el resto de Espacios de Trabajo hoy; si hace falta restringir a
+// creadoPor más adelante, se ajusta en las reglas de Firestore).
+async function fsRenombrarEspacio(espacioId, nuevoNombre) {
+  await db().collection("espacios").doc(espacioId).update({ nombre: nuevoNombre || "" });
+}
+
+// Borra el espacio y limpia el espacioId de todos sus proyectos (vuelven a
+// "Propio" del dueño de cada uno, no se borran ni se mueven de dueño).
+// Solo debería poder llamarlo el creador — la reglas de Firestore son la
+// protección real (allow delete: if creadoPor == request.auth.uid), esto
+// asume que ya están así; si no, avisar a Kevin de actualizarlas.
+async function fsBorrarEspacio(espacioId) {
+  const q = await db().collection("proyectos").where("espacioId", "==", espacioId).get();
+  for (const d of q.docs) {
+    try { await db().collection("proyectos").doc(d.id).update({ espacioId: null }); } catch (e) {
+      console.error("No se pudo desvincular el proyecto", d.id, "del espacio borrado", e);
+    }
+  }
+  await db().collection("espacios").doc(espacioId).delete();
+}
+
+// Un miembro se saca a sí mismo de un espacio (no es lo mismo que borrarlo:
+// el espacio y sus proyectos siguen existiendo para el resto).
+async function fsSalirDeEspacio(espacioId, uid) {
+  await db().collection("espacios").doc(espacioId).update({
+    miembrosUids: firebase.firestore.FieldValue.arrayRemove(uid),
+  });
+}
+
 async function fsMoverProyectoDeEspacio(proyectoId, nuevoEspacioId) {
   const ref = db().collection("proyectos").doc(proyectoId);
   const snap = await ref.get();
@@ -340,6 +370,9 @@ window.fsInvitarAEspacio = fsInvitarAEspacio;
 window.fsAceptarInvitacionesEspacio = fsAceptarInvitacionesEspacio;
 window.fsListarInvitacionesPendientes = fsListarInvitacionesPendientes;
 window.fsMoverProyectoDeEspacio = fsMoverProyectoDeEspacio;
+window.fsRenombrarEspacio = fsRenombrarEspacio;
+window.fsBorrarEspacio = fsBorrarEspacio;
+window.fsSalirDeEspacio = fsSalirDeEspacio;
 window.fsTomarCandado = fsTomarCandado;
 window.fsSoltarCandado = fsSoltarCandado;
 window.fsEscucharCandado = fsEscucharCandado;
