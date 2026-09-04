@@ -363,7 +363,7 @@ function avisarConflictoAlReconectar(remoto) {
   if (avisandoConflicto) return;
   avisandoConflicto = true;
   window.pedirEleccion(
-    "Otra persona guardó cambios en este proyecto mientras estabas sin conexión. No se puede combinar automáticamente. Elegí cómo seguir.",
+    "Otra persona guardó cambios en este proyecto mientras estabas sin conexión. No se puede combinar automáticamente. Elegi cu00f3mo seguir.",
     [
       { label: "Traer esos cambios (descarta lo mío)", act: "traer", clase: "danger" },
       { label: "Guardar lo mío como copia aparte", act: "copia", clase: "primary" },
