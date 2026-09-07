@@ -66,7 +66,15 @@ function db() {
 }
 
 function sanitizarEmailComoId(email) {
-  return String(email).trim().toLowerCase().replace(/[/]/g, "_");
+  // DEBE coincidir exactamente con sanitizarEmailComoId en
+  // functions/index.js — antes solo reemplazaba "/", mientras la Cloud
+  // Function reemplaza cualquier caracter no alfanumérico. Con eso
+  // desalineado, fsAceptarInvitacionesEspacio (la Cloud Function) buscaba
+  // la invitación en un ID de documento distinto al que el cliente había
+  // escrito con fsInvitarAEspacio — nunca la encontraba, aunque la UI
+  // mostrara la invitación pendiente igual (esa lectura sí usaba el ID
+  // viejo del cliente). "Unirme a todas" fallaba en silencio.
+  return String(email).trim().toLowerCase().replace(/[^a-z0-9]/g, "_");
 }
 
 async function fsAsegurarProyecto(proyectoId, { nombre, cliente, fecha, ownerId, ownerEmail, espacioId }) {
@@ -194,6 +202,22 @@ async function fsAceptarInvitacionesEspacio() {
   const llamar = firebase.functions().httpsCallable("aceptarInvitacionesEspacio");
   const r = await llamar();
   return (r && r.data && r.data.aceptadas) || [];
+}
+
+// Lista los miembros de un espacio con email/nombre — solo se puede saber
+// resolviendo uid contra Firebase Auth (Admin SDK), no queda otra que una
+// Cloud Function; el cliente no tiene forma de leer el perfil de OTRO uid.
+// Devuelve [] con un mensaje en consola si la persona ya no es miembro o si
+// hubo un error de red — la Cloud Function tira permission-denied si no sos
+// miembro del espacio que preguntás.
+async function fsListarMiembrosEspacio(espacioId) {
+  if (!firebase.functions) {
+    console.error("firebase-functions-compat.js no está cargado — no se pueden ver los miembros del espacio.");
+    return [];
+  }
+  const llamar = firebase.functions().httpsCallable("listarMiembrosEspacio");
+  const r = await llamar({ espacioId });
+  return (r && r.data && r.data.miembros) || [];
 }
 
 async function fsListarInvitacionesPendientes(email) {
@@ -368,6 +392,7 @@ window.fsListarMisEspacios = fsListarMisEspacios;
 window.fsListarProyectosDeEspacio = fsListarProyectosDeEspacio;
 window.fsInvitarAEspacio = fsInvitarAEspacio;
 window.fsAceptarInvitacionesEspacio = fsAceptarInvitacionesEspacio;
+window.fsListarMiembrosEspacio = fsListarMiembrosEspacio;
 window.fsListarInvitacionesPendientes = fsListarInvitacionesPendientes;
 window.fsMoverProyectoDeEspacio = fsMoverProyectoDeEspacio;
 window.fsRenombrarEspacio = fsRenombrarEspacio;
