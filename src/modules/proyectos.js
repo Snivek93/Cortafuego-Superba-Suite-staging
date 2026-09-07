@@ -430,6 +430,45 @@ function abrirModalInvitacionesPendientes() {
   });
 }
 
+function abrirModalMiembrosEspacio(espacioId, nombreEspacio) {
+  if (!window.fsListarMiembrosEspacio) {
+    if (window.mostrarToast) mostrarToast("Ver miembros todavía no está disponible en esta versión.", "error");
+    return;
+  }
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <p style="font-weight:600;margin:0 0 12px;">Miembros de ${escapeHtml(nombreEspacio || "espacio")}</p>
+      <div id="proy-miembros-lista"><p style="font-size:var(--fs-sm);color:var(--text-muted);">Cargando…</p></div>
+      <div class="modal-actions">
+        <button class="secondary" data-act="cancel">Cerrar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.dataset.act === "cancel") overlay.remove();
+  });
+  window.fsListarMiembrosEspacio(espacioId).then((miembros) => {
+    const cont = document.getElementById("proy-miembros-lista");
+    if (!cont) return; // el modal ya se cerró antes de que llegara la respuesta
+    if (!miembros.length) {
+      cont.innerHTML = `<p style="font-size:var(--fs-sm);color:var(--text-muted);">No se encontraron miembros.</p>`;
+      return;
+    }
+    cont.innerHTML = miembros.map((m) => `
+      <div class="invitacion-espacio-fila">
+        <div>
+          <p class="invitacion-espacio-nombre">${escapeHtml(m.nombre || m.email || "Sin nombre")}${m.esCreador ? `<span class="badge-manual">Creador</span>` : ""}</p>
+          ${m.nombre && m.email ? `<p class="invitacion-espacio-sub">${escapeHtml(m.email)}</p>` : ""}
+        </div>
+      </div>`).join("");
+  }).catch((e) => {
+    const cont = document.getElementById("proy-miembros-lista");
+    if (cont) cont.innerHTML = `<p class="auth-error">No se pudo cargar: ${escapeHtml(e && e.message ? e.message : "revisá tu conexión.")}</p>`;
+  });
+}
+
 function abrirModalMoverDeEspacio(proyectoId) {
   if (!window.fsMoverProyectoDeEspacio) {
     if (window.mostrarToast) mostrarToast("Mover de espacio todavía no está disponible en esta versión.", "error");
@@ -579,6 +618,9 @@ function dropdownEspacioHTML() {
   const badgeInvitaciones = INVITACIONES_ESPACIO.length ? `<span class="badge-invitacion">${INVITACIONES_ESPACIO.length}</span>` : "";
   const espacioActivo = ESPACIO_ACTIVO_ID ? ESPACIOS.find((e) => e.id === ESPACIO_ACTIVO_ID) : null;
   const esCreadorDelActivo = !!(espacioActivo && espacioActivo.creadoPor === user.uid);
+  const btnMiembros = ESPACIO_ACTIVO_ID
+    ? `<button type="button" class="dropdown-item" id="proy-btn-ver-miembros"><svg class="icon"><use href="#i-eye"/></svg>Ver miembros</button>`
+    : "";
   const btnInvitar = ESPACIO_ACTIVO_ID
     ? `<button type="button" class="dropdown-item" id="proy-btn-invitar-espacio"><svg class="icon"><use href="#i-share"/></svg>Invitar a este espacio</button>`
     : "";
@@ -595,6 +637,7 @@ function dropdownEspacioHTML() {
       <div class="dropdown-sep"></div>
       <button type="button" class="dropdown-item" id="proy-btn-crear-espacio"><svg class="icon"><use href="#i-plus"/></svg>Crear espacio</button>
       <button type="button" class="dropdown-item" id="proy-btn-invitaciones-espacio"><svg class="icon"><use href="#i-clipboard-list"/></svg>Invitaciones pendientes${badgeInvitaciones}</button>
+      ${btnMiembros}
       ${btnInvitar}
       ${btnRenombrar}
       ${btnBorrarOSalir}
@@ -1108,6 +1151,12 @@ async function renderPantallaProyectos(permitirCerrar) {
     if (btnCrearEspacio) btnCrearEspacio.addEventListener("click", () => { dropdownEspacio.classList.remove("open"); abrirModalCrearEspacio(); });
     const btnInvitaciones = document.getElementById("proy-btn-invitaciones-espacio");
     if (btnInvitaciones) btnInvitaciones.addEventListener("click", () => { dropdownEspacio.classList.remove("open"); abrirModalInvitacionesPendientes(); });
+    const btnVerMiembros = document.getElementById("proy-btn-ver-miembros");
+    if (btnVerMiembros) btnVerMiembros.addEventListener("click", () => {
+      dropdownEspacio.classList.remove("open");
+      const activo = ESPACIOS.find((e) => e.id === ESPACIO_ACTIVO_ID);
+      abrirModalMiembrosEspacio(ESPACIO_ACTIVO_ID, activo && activo.nombre);
+    });
     const btnInvitarEspacio = document.getElementById("proy-btn-invitar-espacio");
     if (btnInvitarEspacio) btnInvitarEspacio.addEventListener("click", () => {
       dropdownEspacio.classList.remove("open");
