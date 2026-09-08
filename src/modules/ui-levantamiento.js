@@ -841,10 +841,26 @@ function abrirLevantamientoJuntas() {
   renderLevantamiento();
 }
 
+// Salida animada (fade + baja 6px) antes de cortar de golpe. La entrada la
+// anima CSS solo (animation en la regla body.modo-levantamiento
+// #levantamiento-fullscreen de styles.css, se retriggerea cada vez que el
+// elemento pasa de display:none a block). La salida SÍ necesita este paso
+// por JS: el corte real pasa en el mismo instante en que se saca la clase
+// del <body>, y CSS no puede animar una desaparición atada a remover una
+// clase — necesita el intervalo para que la transición de salida corra
+// antes de que el contenido de atrás (Calculadora/Levantamiento tab)
+// vuelva a aparecer.
 function cerrarLevantamiento() {
-  document.body.classList.remove("modo-levantamiento");
-  if (ACTIVE_TAB === "levantamiento-tab") renderLevantamientoTab();
-  else renderTable();
+  const reducida = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const finalizar = () => {
+    document.body.classList.remove("modo-levantamiento");
+    document.body.classList.remove("levantamiento-saliendo");
+    if (ACTIVE_TAB === "levantamiento-tab") renderLevantamientoTab();
+    else renderTable();
+  };
+  if (reducida) { finalizar(); return; }
+  document.body.classList.add("levantamiento-saliendo");
+  setTimeout(finalizar, 200);
 }
 
 function agruparPorZona() {
@@ -1894,10 +1910,24 @@ function renderLevantamientoTabJuntas() {
   });
 }
 
+// Orden real de las pestañas hermanas (Calculadora / Levantamiento /
+// Resultados) — decide si el panel que entra desliza desde la derecha
+// (avanzando) o desde la izquierda (retrocediendo), para que la animación
+// tenga sentido direccional y no sea siempre el mismo movimiento.
+const TAB_ORDEN = ["calculadora", "levantamiento-tab", "resumen"];
 function switchTab(tab) {
+  const anterior = ACTIVE_TAB;
   ACTIVE_TAB = tab;
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
-  document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "panel-" + tab));
+  const idxAnterior = TAB_ORDEN.indexOf(anterior);
+  const idxNuevo = TAB_ORDEN.indexOf(tab);
+  const vaHaciaAtras = idxAnterior !== -1 && idxNuevo !== -1 && idxNuevo < idxAnterior;
+  document.querySelectorAll(".tab-panel").forEach(p => {
+    const esActivo = p.id === "panel-" + tab;
+    p.classList.remove("tab-panel-dir-atras");
+    if (esActivo && vaHaciaAtras) p.classList.add("tab-panel-dir-atras");
+    p.classList.toggle("active", esActivo);
+  });
   if (tab === "resumen") renderResumen();
   if (tab === "calculadora") renderTable();
   if (tab === "levantamiento-tab") renderLevantamientoTab();
