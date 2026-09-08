@@ -17,6 +17,10 @@ let CARPETA_ACTIVA_ID = null;
 let ESPACIOS = [];
 let ESPACIO_ACTIVO_ID = null;
 let INVITACIONES_ESPACIO = [];
+// Cache local (IndexedDB) de "a qué espacio pertenece cada proyecto" —
+// permite que el filtrado por espacio activo funcione incluso sin
+// conexión, usando el último dato confirmado. Ver cargarEstadoOrganizacion().
+let ESPACIO_POR_PROYECTO_LOCAL = {};
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -53,6 +57,20 @@ async function cargarEstadoOrganizacion(soloLocal) {
     MODO_ORDEN = modoGuardado || "manual";
   } catch (e) { MODO_ORDEN = "manual"; }
 
+  // Cache local de "a qué espacio pertenece cada proyecto" — SIN esto, el
+  // filtrado por espacio activo en la Pantalla de Proyectos no tenía forma
+  // de funcionar offline: espacioIdConocido se calculaba de cero en cada
+  // render a partir de 3 llamadas a Firestore, así que en el pase local
+  // (sin red) TODOS los proyectos quedaban sin espacio conocido, y con un
+  // espacio compartido activo el filtro los excluía a todos — la lista se
+  // veía vacía aunque los proyectos estuvieran perfectos en el dispositivo.
+  // Kevin, 08/09/2026: "si no tengo conexión, ¿me van a salir los
+  // proyectos que he abierto alguna vez [en un espacio compartido]?".
+  // Se actualiza cada vez que Firestore confirma el espacio real de un
+  // proyecto (ver los 3 bloques remotos más abajo) y sirve de mejor-dato-
+  // disponible mientras tanto.
+  try { ESPACIO_POR_PROYECTO_LOCAL = (await window.idbLeerMetaClave("espacioPorProyecto")) || {}; } catch (e) { ESPACIO_POR_PROYECTO_LOCAL = {}; }
+
   const user = window.usuarioActual ? window.usuarioActual() : null;
   if (!soloLocal) {
     ESPACIOS = [];
@@ -74,6 +92,7 @@ async function cargarEstadoOrganizacion(soloLocal) {
 }
 function guardarCarpetas() { window.idbGuardarMetaClave && window.idbGuardarMetaClave("carpetas", CARPETAS).catch(() => {}); }
 function guardarAsignaciones() { window.idbGuardarMetaClave && window.idbGuardarMetaClave("carpetaAsignaciones", CARPETA_ASIGNACIONES).catch(() => {}); }
+function guardarEspacioPorProyectoLocal() { window.idbGuardarMetaClave && window.idbGuardarMetaClave("espacioPorProyecto", ESPACIO_POR_PROYECTO_LOCAL).catch(() => {}); }
 function guardarOrdenManual() { window.idbGuardarMetaClave && window.idbGuardarMetaClave("ordenManual", ORDEN_MANUAL).catch(() => {}); }
 function guardarModoOrden() { window.idbGuardarMetaClave && window.idbGuardarMetaClave("modoOrden", MODO_ORDEN).catch(() => {}); }
 function guardarEspacioActivo() { window.idbGuardarMetaClave && window.idbGuardarMetaClave("espacioActivoId", ESPACIO_ACTIVO_ID).catch(() => {}); }
@@ -778,7 +797,10 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   const idsCompartidos = new Set();
   const candadosAjenosPorProyecto = {};
   const user = window.usuarioActual ? window.usuarioActual() : null;
-  const espacioIdConocido = {};
+  // Arranca con lo último conocido localmente (funciona incluso offline);
+  // los 3 bloques remotos de abajo lo actualizan con el dato real cuando
+  // hay conexión.
+  const espacioIdConocido = Object.assign({}, ESPACIO_POR_PROYECTO_LOCAL);
   // {proyectoId: boolean} — true si YO puedo editar (dueño o editoresUids).
   // Ver un proyecto por pertenecer a un espacio NO da permiso de edición
   // por sí solo — eso lo decide el dueño del proyecto puntualmente (ver
@@ -806,6 +828,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
       for (const remoto of remotos) {
         idsCompartidos.add(remoto.id);
         espacioIdConocido[remoto.id] = remoto.espacioId || null;
+        ESPACIO_POR_PROYECTO_LOCAL[remoto.id] = remoto.espacioId || null;
         permisoEdicionConocido[remoto.id] = true; // llegó acá vía editoresUids array-contains: por definición puede editar
         registrarCandadoAjeno(remoto);
         if (idsLocales.has(remoto.id)) continue;
@@ -840,7 +863,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   if (!soloLocal && user && window.fsListarMisProyectosCompartidos) {
     try {
       const mios = await window.fsListarMisProyectosCompartidos(user.uid);
-      for (const doc of mios) { registrarCandadoAjeno(doc); espacioIdConocido[doc.id] = doc.espacioId || null; permisoEdicionConocido[doc.id] = true; }
+      for (const doc of mios) { registrarCandadoAjeno(doc); espacioIdConocido[doc.id] = doc.espacioId || null; ESPACIO_POR_PROYECTO_LOCAL[doc.id] = doc.espacioId || null; permisoEdicionConocido[doc.id] = true; }
     } catch (e) {
     }
   }
@@ -851,6 +874,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
       const idsLocalesEspacio = new Set(lista.map((p) => p.id));
       for (const doc of deEspacio) {
         espacioIdConocido[doc.id] = ESPACIO_ACTIVO_ID;
+        ESPACIO_POR_PROYECTO_LOCAL[doc.id] = ESPACIO_ACTIVO_ID;
         registrarCandadoAjeno(doc);
         const esDuenoDeEste = !!(user && doc.ownerId === user.uid);
         if (!esDuenoDeEste) idsCompartidos.add(doc.id);
@@ -883,6 +907,8 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
     } catch (e) {
     }
   }
+
+  if (!soloLocal) guardarEspacioPorProyectoLocal();
 
   const conNombreTodos = [];
   const borradoresTodos = [];
