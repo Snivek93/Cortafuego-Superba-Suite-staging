@@ -69,7 +69,8 @@ header.app-header h1 { font-size: var(--fs-md); margin: 0; font-weight: 600; let
 .header-project-fields input { border: 1px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.95); border-radius: var(--radius-sm); padding: 6px 9px; font-size: 13px; color: #1a1a1a; width: 150px; max-width: 100%; }
 .header-project-fields input[type="date"] { width: 130px; }
 .header-actions { margin-left: 0; display: flex; justify-content: flex-start; gap: 4px; align-items: center; flex-wrap: wrap; row-gap: 6px; width: 100%; }
-.header-icon-btn { background: transparent; border: none; padding: 8px; border-radius: var(--radius-sm); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: #ffffff; flex-shrink: 0; }
+.header-icon-btn { background: transparent; border: none; padding: 8px; border-radius: var(--radius-sm); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: #ffffff; flex-shrink: 0; transition: transform .1s ease, background-color .1s ease; }
+.header-icon-btn:active { transform: scale(0.88); background: rgba(255,255,255,0.18); }
 .header-icon-btn .icon { width: 21px; height: 21px; margin-right: 0; }
 @media (hover: hover) and (pointer: fine) { .header-icon-btn:hover { background: rgba(255,255,255,0.1); } }
 .header-spacer { flex: 1 1 16px; min-width: 8px; }
