@@ -279,13 +279,23 @@ function abrirVisorPlanos(opts) {
   renderVisorPlanos();
 }
 
+// Salida animada: agrega la clase que dispara el fade-out en CSS
+// (.overlay-saliendo, ver styles.css) y recién después de esa transición
+// saca el overlay del DOM — sin este paso, sin importar cuánto se anime la
+// entrada, el cierre siempre se iba a sentir de golpe.
 function cerrarVisorPlanos() {
   const overlay = document.getElementById("planos-visor-overlay");
-  if (overlay) overlay.remove();
   document.body.classList.remove("modal-open");
   PLANO_PIN_CONTEXTO = null;
   if (PLANO_CAPA_INFORME && PLANO_CAPA_INFORME.onCerrar) PLANO_CAPA_INFORME.onCerrar();
   PLANO_CAPA_INFORME = null;
+  if (!overlay || overlay.dataset.cerrando) return;
+  overlay.dataset.cerrando = "1";
+  const reducida = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const finalizar = () => { if (overlay.parentNode) overlay.remove(); };
+  if (reducida) { finalizar(); return; }
+  overlay.classList.add("overlay-saliendo");
+  setTimeout(finalizar, 200);
 }
 
 // Devuelve el plano "de trabajo": en modo capa de informe es un objeto virtual

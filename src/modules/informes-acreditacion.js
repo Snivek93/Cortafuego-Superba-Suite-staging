@@ -253,12 +253,20 @@ function abrirVisorAcreditacion() {
   document.body.classList.add("modal-open");
   renderAcreditacion();
 }
+// Mismo patrón de salida animada que cerrarVisorPlanos() en planos.js —
+// ver el comentario ahí para el porqué del paso intermedio.
 function cerrarVisorAcreditacion() {
   const overlay = document.getElementById("acr-visor-overlay");
-  if (overlay) overlay.remove();
   document.body.classList.remove("modal-open");
   ACR_DRAFT = null;
   ACR_FOTO_EDIT = null;
+  if (!overlay || overlay.dataset.cerrando) return;
+  overlay.dataset.cerrando = "1";
+  const reducida = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const finalizar = () => { if (overlay.parentNode) overlay.remove(); };
+  if (reducida) { finalizar(); return; }
+  overlay.classList.add("overlay-saliendo");
+  setTimeout(finalizar, 200);
 }
 
 function abrirNuevoInforme() {
