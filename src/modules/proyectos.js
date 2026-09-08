@@ -38,7 +38,12 @@ function formatearFechaRelativa(iso) {
   return "Actualizado " + fecha.toLocaleDateString("es-CR", { day: "numeric", month: "short" });
 }
 
-async function cargarEstadoOrganizacion() {
+// soloLocal=true: pase instantáneo (solo IndexedDB, nada de Firestore) para
+// que mostrarPantallaProyectos() pueda pintar la pantalla sin esperar red.
+// Con soloLocal, ESPACIOS/INVITACIONES_ESPACIO se dejan como estén (lo que
+// haya quedado de la última sincronización real) en vez de vaciarlos a []
+// — así el selector de espacio no parpadea a "Propio" por un instante.
+async function cargarEstadoOrganizacion(soloLocal) {
   try { CARPETAS = (await window.idbLeerMetaClave("carpetas")) || []; } catch (e) { CARPETAS = []; }
   try { CARPETA_ASIGNACIONES = (await window.idbLeerMetaClave("carpetaAsignaciones")) || {}; } catch (e) { CARPETA_ASIGNACIONES = {}; }
   try { ORDEN_MANUAL = (await window.idbLeerMetaClave("ordenManual")) || { raiz: [], porCarpeta: {} }; } catch (e) { ORDEN_MANUAL = { raiz: [], porCarpeta: {} }; }
@@ -49,18 +54,22 @@ async function cargarEstadoOrganizacion() {
   } catch (e) { MODO_ORDEN = "manual"; }
 
   const user = window.usuarioActual ? window.usuarioActual() : null;
-  ESPACIOS = [];
-  if (user && window.fsListarMisEspacios) {
-    try { ESPACIOS = await window.fsListarMisEspacios(user.uid); } catch (e) { ESPACIOS = []; }
+  if (!soloLocal) {
+    ESPACIOS = [];
+    if (user && window.fsListarMisEspacios) {
+      try { ESPACIOS = await window.fsListarMisEspacios(user.uid); } catch (e) { ESPACIOS = []; }
+    }
   }
   try {
     const espacioGuardado = await window.idbLeerMetaClave("espacioActivoId");
     ESPACIO_ACTIVO_ID = espacioGuardado || null;
   } catch (e) { ESPACIO_ACTIVO_ID = null; }
   if (ESPACIO_ACTIVO_ID && !ESPACIOS.find((e) => e.id === ESPACIO_ACTIVO_ID)) ESPACIO_ACTIVO_ID = null;
-  INVITACIONES_ESPACIO = [];
-  if (user && user.email && window.fsListarInvitacionesPendientes) {
-    try { INVITACIONES_ESPACIO = await window.fsListarInvitacionesPendientes(user.email); } catch (e) { INVITACIONES_ESPACIO = []; }
+  if (!soloLocal) {
+    INVITACIONES_ESPACIO = [];
+    if (user && user.email && window.fsListarInvitacionesPendientes) {
+      try { INVITACIONES_ESPACIO = await window.fsListarInvitacionesPendientes(user.email); } catch (e) { INVITACIONES_ESPACIO = []; }
+    }
   }
 }
 function guardarCarpetas() { window.idbGuardarMetaClave && window.idbGuardarMetaClave("carpetas", CARPETAS).catch(() => {}); }
@@ -759,9 +768,9 @@ function crearOverlaySiHaceFalta() {
   return el;
 }
 
-async function renderPantallaProyectos(permitirCerrar) {
+async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   const overlay = crearOverlaySiHaceFalta();
-  await cargarEstadoOrganizacion();
+  await cargarEstadoOrganizacion(soloLocal);
 
   let lista = [];
   try { lista = await window.idbListarProyectos(); } catch (e) { lista = []; }
@@ -784,7 +793,7 @@ async function renderPantallaProyectos(permitirCerrar) {
     candadosAjenosPorProyecto[doc.id] = c.nombre || "Otra persona";
   }
 
-  if (user && window.fsListarProyectosCompartidosConmigo) {
+  if (!soloLocal && user && window.fsListarProyectosCompartidosConmigo) {
     try {
       if (window.invitacionesResueltas) {
         await Promise.race([
@@ -828,7 +837,7 @@ async function renderPantallaProyectos(permitirCerrar) {
     }
   }
 
-  if (user && window.fsListarMisProyectosCompartidos) {
+  if (!soloLocal && user && window.fsListarMisProyectosCompartidos) {
     try {
       const mios = await window.fsListarMisProyectosCompartidos(user.uid);
       for (const doc of mios) { registrarCandadoAjeno(doc); espacioIdConocido[doc.id] = doc.espacioId || null; permisoEdicionConocido[doc.id] = true; }
@@ -836,7 +845,7 @@ async function renderPantallaProyectos(permitirCerrar) {
     }
   }
 
-  if (ESPACIO_ACTIVO_ID && window.fsListarProyectosDeEspacio) {
+  if (!soloLocal && ESPACIO_ACTIVO_ID && window.fsListarProyectosDeEspacio) {
     try {
       const deEspacio = await window.fsListarProyectosDeEspacio(ESPACIO_ACTIVO_ID);
       const idsLocalesEspacio = new Set(lista.map((p) => p.id));
@@ -1204,17 +1213,39 @@ function ocultarPantallaProyectos() {
   if (window.mostrarVistaProyecto) window.mostrarVistaProyecto();
 }
 
+// Pase instantáneo: renderiza solo con lo que ya hay en IndexedDB (sin
+// esperar red) para que el overlay aparezca al toque. Kevin, 08/09/2026:
+// "el botón de home dura tanto en suceder que uno no sabe si le dio click".
+// La causa real: renderPantallaProyectos() esperaba fsListarMisEspacios,
+// fsListarInvitacionesPendientes y hasta 3 llamadas más a Firestore ANTES
+// de mostrar nada — con conexión de obra eso son varios segundos a ciegas.
+// Ahora se muestra ya mismo con lo local, y lo remoto llega después sin
+// bloquear (ver sincronizarProyectosRemotosYActualizar debajo).
 async function mostrarPantallaProyectos() {
   if (window.soltarCandadoActivoSiHaceFalta) {
     window.soltarCandadoActivoSiHaceFalta();
   }
   const hayProyectoAbierto = !!window.PROYECTO_ACTIVO_ID;
-  await renderPantallaProyectos(hayProyectoAbierto);
+  await renderPantallaProyectos(hayProyectoAbierto, true);
   const overlay = document.getElementById("pantalla-proyectos");
   overlay.hidden = false;
   overlay.offsetHeight;
   overlay.classList.add("proy-visible");
   if (window.ocultarVistaProyecto) window.ocultarVistaProyecto();
+  sincronizarProyectosRemotosYActualizar(hayProyectoAbierto);
+}
+
+// Segunda pasada, en segundo plano: trae espacios, invitaciones y proyectos
+// compartidos/del espacio desde Firestore, y vuelve a renderizar ya con eso
+// mezclado. Si el usuario cerró la pantalla mientras tanto, no hace nada
+// (evita reabrirla sola ni pisar contenido de otra pantalla).
+async function sincronizarProyectosRemotosYActualizar(permitirCerrar) {
+  const overlay = document.getElementById("pantalla-proyectos");
+  if (!overlay || overlay.hidden) return;
+  try {
+    await renderPantallaProyectos(permitirCerrar, false);
+  } catch (e) {
+  }
 }
 
 function actualizarCuentaProyectos() {
