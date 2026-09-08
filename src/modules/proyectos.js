@@ -1355,5 +1355,18 @@ window.mostrarPantallaProyectos = mostrarPantallaProyectos;
 window.ocultarPantallaProyectos = ocultarPantallaProyectos;
 window.actualizarCuentaProyectos = actualizarCuentaProyectos;
 window.espacioActivoIdActual = function () { return ESPACIO_ACTIVO_ID; };
+// Cierra el hueco de "proyecto creado 100% offline dentro de un espacio
+// compartido no aparece en la lista agrupada hasta la primera sincronización".
+// Se llama al crear un proyecto nuevo, ANTES de que exista ninguna
+// confirmación de Firestore — es un valor optimista (asume que el proyecto
+// queda en el espacio que estaba activo al crearlo). Cuando la sync real
+// confirme el espacio (o su ausencia, o un movimiento posterior), los 3
+// bloques remotos de renderPantallaProyectos() lo sobreescriben con el
+// dato real sin que haga falta ningún otro cambio.
+window.registrarEspacioLocalDeProyectoNuevo = function (id, espacioId) {
+  if (!id) return;
+  ESPACIO_POR_PROYECTO_LOCAL[id] = espacioId || null;
+  guardarEspacioPorProyectoLocal();
+};
 
 })();

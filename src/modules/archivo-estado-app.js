@@ -764,6 +764,15 @@ async function soltarCandadoActivoSiHaceFalta() {
 async function crearYAbrirProyectoNuevo() {
   soltarCandadoActivoSiHaceFalta();
   const id = "p_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
+  // Asignación optimista y local del espacio activo a este proyecto nuevo
+  // — funciona sin conexión, no depende de que Firestore confirme nada
+  // todavía. Cierra el hueco de "proyecto creado offline en un espacio
+  // compartido no aparece en la lista agrupada hasta la primera sync".
+  // Kevin, 08/09/2026. Cuando la sincronización real confirme el espacio
+  // (o su ausencia), proyectos.js lo sobreescribe con el dato real solo.
+  if (window.registrarEspacioLocalDeProyectoNuevo) {
+    window.registrarEspacioLocalDeProyectoNuevo(id, window.espacioActivoIdActual ? window.espacioActivoIdActual() : null);
+  }
   PROYECTO_ACTIVO_ID = id;
   PROYECTO_ACTIVO_CREADO_EN = new Date().toISOString();
   PROYECTO_ACTIVO_COMPARTIDO = false;
