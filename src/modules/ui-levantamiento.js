@@ -852,11 +852,17 @@ function abrirLevantamientoJuntas() {
 // vuelva a aparecer.
 function cerrarLevantamiento() {
   const reducida = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // El re-render de la tabla de atrás (puede ser pesado con muchas filas)
+  // se hace ACÁ, ANTES de arrancar el fade — mientras el overlay todavía
+  // tapa todo. Antes corría adentro de finalizar(), es decir DESPUÉS de
+  // los 200ms del fade, y esa reconstrucción de tabla se sumaba como una
+  // pausa extra visible justo cuando el fade ya debería haber terminado.
+  // Kevin, 08/09/2026: "el fade out es mucho más largo que el resto".
+  if (ACTIVE_TAB === "levantamiento-tab") renderLevantamientoTab();
+  else renderTable();
   const finalizar = () => {
     document.body.classList.remove("modo-levantamiento");
     document.body.classList.remove("levantamiento-saliendo");
-    if (ACTIVE_TAB === "levantamiento-tab") renderLevantamientoTab();
-    else renderTable();
   };
   if (reducida) { finalizar(); return; }
   document.body.classList.add("levantamiento-saliendo");

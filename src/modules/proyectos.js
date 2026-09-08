@@ -1244,17 +1244,71 @@ async function mostrarPantallaProyectos() {
   sincronizarProyectosRemotosYActualizar(hayProyectoAbierto);
 }
 
+// Límite de espera para la sincronización remota de Proyectos. Sin esto,
+// con internet muy lento o sin conexión, el spinner "Cargando proyectos…"
+// podía girar para siempre — ninguna llamada a Firestore tenía tope de
+// tiempo (solo invitacionesResueltas() tenía 4s) y los catch solo atajan
+// errores, no cuelgues. Kevin, 08/09/2026: "qué pasa si el internet
+// estuviera muy lento o no tuviera conexión mientras carga".
+const TIMEOUT_SYNC_PROYECTOS_MS = 8000;
+
+// Contador de "intento vigente": si se reintenta (botón o volver a abrir
+// la pantalla) mientras una sincronización vieja seguía pendiente en
+// segundo plano, esa vieja no debe pisar el resultado de la nueva cuando
+// eventualmente conteste.
+let SYNC_PROYECTOS_GENERACION = 0;
+
 // Segunda pasada, en segundo plano: trae espacios, invitaciones y proyectos
 // compartidos/del espacio desde Firestore, y vuelve a renderizar ya con eso
 // mezclado. Si el usuario cerró la pantalla mientras tanto, no hace nada
-// (evita reabrirla sola ni pisar contenido de otra pantalla).
+// (evita reabrirla sola ni pisar contenido de otra pantalla). Si Firestore
+// no contesta dentro de TIMEOUT_SYNC_PROYECTOS_MS, se deja de esperar: si
+// la pantalla seguía mostrando el spinner (sin nada local que mostrar), se
+// reemplaza por un aviso con botón de reintentar en vez de girar para
+// siempre. Si ya había proyectos locales visibles, no se interrumpe nada
+// — simplemente no llegó lo compartido por ahora.
 async function sincronizarProyectosRemotosYActualizar(permitirCerrar) {
   const overlay = document.getElementById("pantalla-proyectos");
   if (!overlay || overlay.hidden) return;
-  try {
-    await renderPantallaProyectos(permitirCerrar, false);
-  } catch (e) {
+  const miGeneracion = ++SYNC_PROYECTOS_GENERACION;
+
+  let seAgotoElTiempo = false;
+  const esperaConLimite = new Promise((resolve) => {
+    setTimeout(() => { seAgotoElTiempo = true; resolve(); }, TIMEOUT_SYNC_PROYECTOS_MS);
+  });
+  const intentoRemoto = renderPantallaProyectos(permitirCerrar, false).catch(() => {});
+
+  await Promise.race([intentoRemoto, esperaConLimite]);
+
+  if (miGeneracion !== SYNC_PROYECTOS_GENERACION) return; // hubo un reintento más nuevo
+  if (!overlay || overlay.hidden) return;
+  if (seAgotoElTiempo) {
+    mostrarAvisoSinConexionProyectos(overlay, permitirCerrar);
   }
+  // Si intentoRemoto sigue pendiente y responde más tarde (la conexión
+  // vuelve), renderPantallaProyectos() va a actualizar el overlay por su
+  // cuenta cuando resuelva — no hace falta hacer nada más acá.
+}
+
+// Reemplaza el spinner de carga por un aviso real cuando se agotó el
+// tiempo de espera de la red. Si para ese momento ya había proyectos
+// locales visibles (el spinner ya no está en el DOM), no hace nada — no
+// hay nada que avisar, el usuario ya está viendo su lista.
+function mostrarAvisoSinConexionProyectos(overlay, permitirCerrar) {
+  const spinnerWrap = overlay.querySelector(".proy-cargando-spinner-wrap");
+  if (!spinnerWrap) return;
+  spinnerWrap.outerHTML = `
+    <div class="proy-vacio">
+      <svg class="icon proy-vacio-icono"><use href="#i-folder"/></svg>
+      <p>No se pudo conectar para revisar proyectos compartidos.<br>Si tenés proyectos guardados en este dispositivo deberían aparecer solos; si la lista sigue vacía, revisá tu conexión.</p>
+      <button type="button" class="secondary" id="proy-btn-reintentar-sync" style="margin-top:10px;">Reintentar</button>
+    </div>`;
+  const btnReintentar = document.getElementById("proy-btn-reintentar-sync");
+  if (btnReintentar) btnReintentar.addEventListener("click", () => {
+    renderPantallaProyectos(permitirCerrar, true).then(() => {
+      sincronizarProyectosRemotosYActualizar(permitirCerrar);
+    });
+  });
 }
 
 function actualizarCuentaProyectos() {
