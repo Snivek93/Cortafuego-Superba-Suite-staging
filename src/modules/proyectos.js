@@ -811,20 +811,29 @@ async function refrescarSiHayVersionMasNueva(doc, lista) {
   // sepa, podría hacer que una edición en curso se guarde encima de la
   // versión recién bajada.
   if (window.PROYECTO_ACTIVO_ID === id) return;
-  if (!doc.payloadJson) return;
+  // doc viene tal cual de una consulta de LISTADO (documento liviano): el
+  // campo real de versión ahí es versionSync, no version.
+  const versionRemotaConocida = doc.versionSync || 0;
+  if (!doc.tieneContenido && !doc.payloadJson) return; // de verdad no hay nada que traer todavía
+  if (!window.fsDescargarUltimaVersion) return;
   let versionLocalConocida = null;
   try {
     versionLocalConocida = window.idbLeerMetaClave ? await window.idbLeerMetaClave("fsVersionLocal:" + id) : null;
   } catch (e) {
     return;
   }
-  if (versionLocalConocida !== null && versionLocalConocida === doc.version) return; // ya está al día
+  if (versionLocalConocida !== null && versionLocalConocida === versionRemotaConocida) return; // ya está al día
   try {
-    let jsonConImagenes = doc.payloadJson;
-    if (doc.imagenesUrls && Object.keys(doc.imagenesUrls).length > 0 && window.fsDescargarImagenesComoJson && window.reinsertarImagenesGrandes) {
+    // fsDescargarUltimaVersion ya sabe leer el esquema liviano O el pesado
+    // (subcolección contenido/data) — es la misma función que usa
+    // detectarSiEsCompartido() al abrir un proyecto puntual.
+    const remoto = await window.fsDescargarUltimaVersion(id);
+    if (!remoto || !remoto.payloadJson) return;
+    let jsonConImagenes = remoto.payloadJson;
+    if (remoto.imagenesUrls && Object.keys(remoto.imagenesUrls).length > 0 && window.fsDescargarImagenesComoJson && window.reinsertarImagenesGrandes) {
       try {
-        const imagenesJson = await window.fsDescargarImagenesComoJson(doc.imagenesUrls);
-        jsonConImagenes = window.reinsertarImagenesGrandes(doc.payloadJson, imagenesJson);
+        const imagenesJson = await window.fsDescargarImagenesComoJson(remoto.imagenesUrls);
+        jsonConImagenes = window.reinsertarImagenesGrandes(remoto.payloadJson, imagenesJson);
       } catch (e2) {
         console.error("No se pudieron bajar las fotos al refrescar", id, e2);
       }
@@ -835,7 +844,7 @@ async function refrescarSiHayVersionMasNueva(doc, lista) {
     data.creadoEn = data.creadoEn || data.guardadoEn;
     await window.idbGuardarProyecto(id, data);
     if (window.idbGuardarMetaClave) {
-      try { await window.idbGuardarMetaClave("fsVersionLocal:" + id, doc.version); } catch (e3) {}
+      try { await window.idbGuardarMetaClave("fsVersionLocal:" + id, remoto.version); } catch (e3) {}
     }
     const idx = lista.findIndex((p) => p.id === id);
     if (idx >= 0) lista[idx] = { id, data };
@@ -889,30 +898,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
         ESPACIO_POR_PROYECTO_LOCAL[remoto.id] = remoto.espacioId || null;
         permisoEdicionConocido[remoto.id] = true; // llegó acá vía editoresUids array-contains: por definición puede editar
         registrarCandadoAjeno(remoto);
-        if (idsLocales.has(remoto.id)) { await refrescarSiHayVersionMasNueva(remoto, lista); continue; }
-        if (!remoto.payloadJson) continue;
-        try {
-          let jsonConImagenes = remoto.payloadJson;
-          if (remoto.imagenesUrls && Object.keys(remoto.imagenesUrls).length > 0 && window.fsDescargarImagenesComoJson && window.reinsertarImagenesGrandes) {
-            try {
-              const imagenesJson = await window.fsDescargarImagenesComoJson(remoto.imagenesUrls);
-              jsonConImagenes = window.reinsertarImagenesGrandes(remoto.payloadJson, imagenesJson);
-            } catch (e2) {
-              console.error("No se pudieron bajar las fotos del proyecto compartido", remoto.id, e2);
-            }
-          }
-          const data = JSON.parse(jsonConImagenes);
-          data.id = remoto.id;
-          data.guardadoEn = data.guardadoEn || new Date().toISOString();
-          data.creadoEn = data.creadoEn || data.guardadoEn;
-          await window.idbGuardarProyecto(remoto.id, data);
-          if (window.idbGuardarMetaClave) {
-            try { await window.idbGuardarMetaClave("fsVersionLocal:" + remoto.id, remoto.version); } catch (e3) {}
-          }
-          lista.push({ id: remoto.id, data });
-        } catch (e) {
-          console.error("No se pudo traer el proyecto compartido", remoto.id, e);
-        }
+        await refrescarSiHayVersionMasNueva(remoto, lista);
       }
     } catch (e) {
     }
@@ -943,30 +929,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
         const esDuenoDeEste = !!(user && doc.ownerId === user.uid);
         if (!esDuenoDeEste) idsCompartidos.add(doc.id);
         permisoEdicionConocido[doc.id] = esDuenoDeEste || (Array.isArray(doc.editoresUids) && !!user && doc.editoresUids.includes(user.uid));
-        if (idsLocalesEspacio.has(doc.id)) { await refrescarSiHayVersionMasNueva(doc, lista); continue; }
-        if (!doc.payloadJson) continue;
-        try {
-          let jsonConImagenes = doc.payloadJson;
-          if (doc.imagenesUrls && Object.keys(doc.imagenesUrls).length > 0 && window.fsDescargarImagenesComoJson && window.reinsertarImagenesGrandes) {
-            try {
-              const imagenesJson = await window.fsDescargarImagenesComoJson(doc.imagenesUrls);
-              jsonConImagenes = window.reinsertarImagenesGrandes(doc.payloadJson, imagenesJson);
-            } catch (e2) {
-              console.error("No se pudieron bajar las fotos de un proyecto del espacio", doc.id, e2);
-            }
-          }
-          const data = JSON.parse(jsonConImagenes);
-          data.id = doc.id;
-          data.guardadoEn = data.guardadoEn || new Date().toISOString();
-          data.creadoEn = data.creadoEn || data.guardadoEn;
-          await window.idbGuardarProyecto(doc.id, data);
-          if (window.idbGuardarMetaClave) {
-            try { await window.idbGuardarMetaClave("fsVersionLocal:" + doc.id, doc.version); } catch (e3) {}
-          }
-          lista.push({ id: doc.id, data });
-        } catch (e) {
-          console.error("No se pudo traer un proyecto del espacio", doc.id, e);
-        }
+        await refrescarSiHayVersionMasNueva(doc, lista);
       }
     } catch (e) {
     }
