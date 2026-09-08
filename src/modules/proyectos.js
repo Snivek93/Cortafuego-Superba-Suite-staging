@@ -939,8 +939,17 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   const seccionBorradores = (!CARPETA_ACTIVA_ID && borradores.length)
     ? `<p class="proy-section-title">Borradores</p><div class="proy-lista">${borradores.map(p => tarjetaProyectoHTML(p.id, p.data, true, false)).join("")}</div>`
     : "";
+  // Mientras soloLocal=true (pase instantáneo) todavía no sabemos si hay
+  // proyectos compartidos/de espacio por llegar de Firestore — mostrar
+  // "Todavía no tenés proyectos" en ese momento es mentirle al usuario por
+  // unos segundos. Kevin, 08/09/2026: "sale vacío y a los segundos aparecen
+  // los proyectos [...] se ve extraño". En vez de eso, un esqueleto de
+  // carga; el mensaje real de "vacío" solo se muestra en el pase remoto
+  // (soloLocal=false), cuando ya se confirmó que de verdad no hay nada.
   const vacio = (!hayAlgoQueMostrar && !borradores.length)
-    ? `<div class="proy-vacio"><svg class="icon proy-vacio-icono"><use href="#i-folder"/></svg><p>Todavía no tenés proyectos.<br>Creá el primero con el botón de abajo.</p></div>`
+    ? (soloLocal
+        ? `<div class="proy-lista-skeleton" aria-hidden="true"><div class="proy-card-skeleton"></div><div class="proy-card-skeleton"></div><div class="proy-card-skeleton"></div></div>`
+        : `<div class="proy-vacio"><svg class="icon proy-vacio-icono"><use href="#i-folder"/></svg><p>Todavía no tenés proyectos.<br>Creá el primero con el botón de abajo.</p></div>`)
     : "";
 
   overlay.innerHTML = `
