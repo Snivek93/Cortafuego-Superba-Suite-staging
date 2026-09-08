@@ -787,6 +787,64 @@ function crearOverlaySiHaceFalta() {
   return el;
 }
 
+// Cubre los DOS bugs de sincronización entre dispositivos a la vez.
+// - Bug 1 (proyecto invisible en otro dispositivo): si el proyecto no
+//   existe localmente todavía, lo descarga y lo guarda — antes solo lo
+//   hacían los bloques de "compartidos conmigo" y "proyectos del
+//   espacio"; al bloque de "todos mis proyectos" (fsListarMisProyectosCompartidos,
+//   nombre engañoso — en realidad trae TODOS los proyectos por ownerId,
+//   no solo los compartidos) le faltaba ese paso por completo.
+// - Bug 2 (tarjeta con fecha vieja): si el proyecto YA existe localmente
+//   pero la versión de Firestore es más nueva (comparando el mismo
+//   "fsVersionLocal:<id>" que ya usa detectarSiEsCompartido() al abrir un
+//   proyecto), lo vuelve a descargar. Antes, los 3 bloques ignoraban por
+//   completo cualquier proyecto ya conocido sin importar qué tan vieja
+//   fuera la copia local — nunca se refrescaba desde la lista, solo al
+//   abrirlo puntualmente.
+// Kevin, 08/09/2026: "cargué Tibas en la laptop, no sale en el celular
+// [...] UCR Golfito y Demasa actualizados hoy, en el celular hace 5 días".
+async function refrescarSiHayVersionMasNueva(doc, lista) {
+  const id = doc.id;
+  // El proyecto activamente abierto en ESTE dispositivo ahora mismo no se
+  // toca acá — su propia sincronización la maneja detectarSiEsCompartido()
+  // al abrirlo. Refrescar su caché por atrás, sin que la pantalla lo
+  // sepa, podría hacer que una edición en curso se guarde encima de la
+  // versión recién bajada.
+  if (window.PROYECTO_ACTIVO_ID === id) return;
+  if (!doc.payloadJson) return;
+  let versionLocalConocida = null;
+  try {
+    versionLocalConocida = window.idbLeerMetaClave ? await window.idbLeerMetaClave("fsVersionLocal:" + id) : null;
+  } catch (e) {
+    return;
+  }
+  if (versionLocalConocida !== null && versionLocalConocida === doc.version) return; // ya está al día
+  try {
+    let jsonConImagenes = doc.payloadJson;
+    if (doc.imagenesUrls && Object.keys(doc.imagenesUrls).length > 0 && window.fsDescargarImagenesComoJson && window.reinsertarImagenesGrandes) {
+      try {
+        const imagenesJson = await window.fsDescargarImagenesComoJson(doc.imagenesUrls);
+        jsonConImagenes = window.reinsertarImagenesGrandes(doc.payloadJson, imagenesJson);
+      } catch (e2) {
+        console.error("No se pudieron bajar las fotos al refrescar", id, e2);
+      }
+    }
+    const data = JSON.parse(jsonConImagenes);
+    data.id = id;
+    data.guardadoEn = data.guardadoEn || new Date().toISOString();
+    data.creadoEn = data.creadoEn || data.guardadoEn;
+    await window.idbGuardarProyecto(id, data);
+    if (window.idbGuardarMetaClave) {
+      try { await window.idbGuardarMetaClave("fsVersionLocal:" + id, doc.version); } catch (e3) {}
+    }
+    const idx = lista.findIndex((p) => p.id === id);
+    if (idx >= 0) lista[idx] = { id, data };
+    else lista.push({ id, data });
+  } catch (e) {
+    console.error("No se pudo refrescar el proyecto", id, e);
+  }
+}
+
 async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   const overlay = crearOverlaySiHaceFalta();
   await cargarEstadoOrganizacion(soloLocal);
@@ -831,7 +889,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
         ESPACIO_POR_PROYECTO_LOCAL[remoto.id] = remoto.espacioId || null;
         permisoEdicionConocido[remoto.id] = true; // llegó acá vía editoresUids array-contains: por definición puede editar
         registrarCandadoAjeno(remoto);
-        if (idsLocales.has(remoto.id)) continue;
+        if (idsLocales.has(remoto.id)) { await refrescarSiHayVersionMasNueva(remoto, lista); continue; }
         if (!remoto.payloadJson) continue;
         try {
           let jsonConImagenes = remoto.payloadJson;
@@ -863,7 +921,13 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   if (!soloLocal && user && window.fsListarMisProyectosCompartidos) {
     try {
       const mios = await window.fsListarMisProyectosCompartidos(user.uid);
-      for (const doc of mios) { registrarCandadoAjeno(doc); espacioIdConocido[doc.id] = doc.espacioId || null; ESPACIO_POR_PROYECTO_LOCAL[doc.id] = doc.espacioId || null; permisoEdicionConocido[doc.id] = true; }
+      for (const doc of mios) {
+        registrarCandadoAjeno(doc);
+        espacioIdConocido[doc.id] = doc.espacioId || null;
+        ESPACIO_POR_PROYECTO_LOCAL[doc.id] = doc.espacioId || null;
+        permisoEdicionConocido[doc.id] = true;
+        await refrescarSiHayVersionMasNueva(doc, lista);
+      }
     } catch (e) {
     }
   }
@@ -879,7 +943,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
         const esDuenoDeEste = !!(user && doc.ownerId === user.uid);
         if (!esDuenoDeEste) idsCompartidos.add(doc.id);
         permisoEdicionConocido[doc.id] = esDuenoDeEste || (Array.isArray(doc.editoresUids) && !!user && doc.editoresUids.includes(user.uid));
-        if (idsLocalesEspacio.has(doc.id)) continue;
+        if (idsLocalesEspacio.has(doc.id)) { await refrescarSiHayVersionMasNueva(doc, lista); continue; }
         if (!doc.payloadJson) continue;
         try {
           let jsonConImagenes = doc.payloadJson;
