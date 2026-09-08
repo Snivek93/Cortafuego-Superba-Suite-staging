@@ -282,10 +282,8 @@ select.cell-input { min-width: 130px; }
 .save-status-badge.error { background: var(--hilti-red, #e2001a); animation: save-status-parpadeo 1.4s ease-in-out infinite; }
 @keyframes save-status-parpadeo { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .save-status-badge.error { animation: none; } }
-.proy-lista-skeleton { display: flex; flex-direction: column; gap: 10px; max-width: 560px; }
-.proy-card-skeleton { height: 64px; border-radius: 14px; background: var(--grey-2); animation: proySkeletonPulso 1.3s ease-in-out infinite; }
-@keyframes proySkeletonPulso { 0%, 100% { opacity: .5; } 50% { opacity: .85; } }
-@media (prefers-reduced-motion: reduce) { .proy-card-skeleton { animation: none; opacity: .7; } }
+.proy-cargando-spinner-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 60px 20px; color: var(--text-muted); font-size: var(--fs-sm); }
+.proy-cargando-spinner { width: 30px; height: 30px; border: 3px solid var(--grey-2); border-top-color: var(--hilti-red); border-radius: 50%; animation: planos-spin 0.8s linear infinite; }
 @media (prefers-reduced-motion: reduce) {
   .tab-panel.active,
   .planos-visor-overlay, .acr-visor-overlay,
