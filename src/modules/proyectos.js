@@ -948,7 +948,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   // (soloLocal=false), cuando ya se confirmó que de verdad no hay nada.
   const vacio = (!hayAlgoQueMostrar && !borradores.length)
     ? (soloLocal
-        ? `<div class="proy-lista-skeleton" aria-hidden="true"><div class="proy-card-skeleton"></div><div class="proy-card-skeleton"></div><div class="proy-card-skeleton"></div></div>`
+        ? `<div class="proy-cargando-spinner-wrap" aria-hidden="true"><div class="proy-cargando-spinner"></div><span>Cargando proyectos…</span></div>`
         : `<div class="proy-vacio"><svg class="icon proy-vacio-icono"><use href="#i-folder"/></svg><p>Todavía no tenés proyectos.<br>Creá el primero con el botón de abajo.</p></div>`)
     : "";
 
