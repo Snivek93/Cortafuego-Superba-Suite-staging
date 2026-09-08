@@ -345,7 +345,20 @@ tr.lev-tabla-nueva-zona:first-child td { border-top: none; }
 table.instr-table { min-width: 460px; }
 table.instr-table td:first-child, table.instr-table th:first-child { width: 32px; color: var(--text-muted); }
 #levantamiento-fullscreen { display: none; }
-body.modo-levantamiento > *:not(#levantamiento-fullscreen):not(#planos-visor-overlay) { display: none !important; }
+/* Antes: la calculadora quedaba display:none TODO el tiempo que
+   modo-levantamiento estaba activo, incluidos los 200ms del fade de
+   salida — recién se revelaba de golpe cuando cerrarLevantamiento()
+   sacaba la clase al final. Con una tabla real de 60+ filas, ese "revelar
+   de golpe" es layout/paint real del navegador, no cosmético, y en video
+   se ve como un frame negro seguido de un frame oscuro antes de aparecer
+   completa (video de Kevin, 08/09/2026 — confirmado con fotogramas).
+   Ahora: en cuanto arranca el fade (se agrega .levantamiento-saliendo,
+   ver cerrarLevantamiento() en ui-levantamiento.js), esta regla deja de
+   aplicar y la calculadora se arma/pinta DETRÁS del overlay que todavía
+   tapa todo (z-index 2000, sigue ahí encima) — para cuando el overlay
+   termina de desvanecerse, la calculadora ya está lista y aparece al
+   instante, sin el frame negro. */
+body.modo-levantamiento:not(.levantamiento-saliendo) > *:not(#levantamiento-fullscreen):not(#planos-visor-overlay) { display: none !important; }
 body.modo-levantamiento #levantamiento-fullscreen { display: block; position: fixed; inset: 0; z-index: 2000; background: var(--grey-1); overflow-y: auto; transition: opacity .2s cubic-bezier(0.22,0.61,0.36,1), transform .2s cubic-bezier(0.22,0.61,0.36,1); animation: overlayEntrar .2s cubic-bezier(0.22,0.61,0.36,1); }
 body.levantamiento-saliendo #levantamiento-fullscreen { opacity: 0; transform: translateY(6px) scale(0.99); }
 .lev-fullscreen-topbar { position: sticky; top: 0; z-index: 10; background: var(--bar-bg); color: white; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 3px solid var(--hilti-red); }
