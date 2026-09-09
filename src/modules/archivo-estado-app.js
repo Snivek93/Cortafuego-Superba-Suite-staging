@@ -51,11 +51,25 @@ async function nuevoProyecto() {
 
 const AUTOSAVE_KEY = "hiltiCortafuegoAutoguardado_v1";
 const IDB_NOMBRE = "firestopSuite";
-const IDB_VERSION = 2;
+// IDB_VERSION 3: agrega IDB_STORE_INDICE — antes, listar los proyectos
+// (para la Pantalla de Proyectos, incluido el cambio entre Espacios de
+// Trabajo) leía el contenido COMPLETO de cada proyecto guardado en este
+// dispositivo (todas las filas, todas las fotos en base64) con
+// idbListarProyectos(), solo para mostrar nombre/cliente/fecha en una
+// tarjeta. Con varios proyectos pesados guardados localmente, eso podía
+// ser varios MB de JSON a decodificar en el hilo principal antes de poder
+// pintar nada — exactamente el "le doy al botón, no pasa nada, y de
+// repente salta" que describió Kevin (08/09/2026) al cambiar de espacio.
+// Ahora existe un store liviano paralelo (solo nombre/cliente/fecha por
+// proyecto) que se mantiene actualizado en la misma escritura que el
+// contenido completo — la lista lee de ahí, y el contenido pesado solo se
+// toca cuando de verdad se abre un proyecto puntual.
+const IDB_VERSION = 3;
 const IDB_STORE = "autoguardado";
 const IDB_CLAVE = "actual";
 const IDB_STORE_PROYECTOS = "proyectos";
 const IDB_STORE_META = "meta";
+const IDB_STORE_INDICE = "indiceProyectos";
 let IDB_PROMESA = null;
 
 function abrirIDB() {
@@ -68,6 +82,7 @@ function abrirIDB() {
       if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
       if (!db.objectStoreNames.contains(IDB_STORE_PROYECTOS)) db.createObjectStore(IDB_STORE_PROYECTOS);
       if (!db.objectStoreNames.contains(IDB_STORE_META)) db.createObjectStore(IDB_STORE_META);
+      if (!db.objectStoreNames.contains(IDB_STORE_INDICE)) db.createObjectStore(IDB_STORE_INDICE);
     };
     req.onsuccess = () => {
       const db = req.result;
@@ -110,13 +125,88 @@ function idbBorrar() {
 }
 function idbGuardarProyecto(id, valor) {
   return abrirIDB().then((db) => new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE_PROYECTOS, "readwrite");
+    const tx = db.transaction([IDB_STORE_PROYECTOS, IDB_STORE_INDICE], "readwrite");
     tx.objectStore(IDB_STORE_PROYECTOS).put(valor, id);
+    const info = (valor && valor.projectInfo) || {};
+    tx.objectStore(IDB_STORE_INDICE).put({
+      nombre: info.nombre || "",
+      cliente: info.cliente || "",
+      guardadoEn: valor && valor.guardadoEn ? valor.guardadoEn : null,
+      creadoEn: valor && valor.creadoEn ? valor.creadoEn : null,
+    }, id);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error || new Error("Error al escribir el proyecto"));
     tx.onabort = () => reject(tx.error || new Error("Transacción abortada (¿sin espacio?)"));
   }));
 }
+
+// Lee SOLO el índice liviano — rápido incluso con muchos proyectos pesados
+// guardados localmente, porque nunca toca las filas ni las fotos.
+function idbListarIndiceProyectos() {
+  return abrirIDB().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE_INDICE, "readonly");
+    const store = tx.objectStore(IDB_STORE_INDICE);
+    const out = [];
+    const req = store.openCursor();
+    req.onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (cursor) {
+        const v = cursor.value || {};
+        out.push({
+          id: cursor.key,
+          data: { projectInfo: { nombre: v.nombre || "", cliente: v.cliente || "" }, guardadoEn: v.guardadoEn || null, creadoEn: v.creadoEn || null },
+        });
+        cursor.continue();
+      } else resolve(out);
+    };
+    req.onerror = () => reject(req.error || new Error("Error al listar el índice de proyectos"));
+  }));
+}
+
+function idbContarEnStore(nombreStore) {
+  return abrirIDB().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(nombreStore, "readonly");
+    const req = tx.objectStore(nombreStore).count();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error("Error al contar"));
+  }));
+}
+
+// Reconstruye el índice liviano UNA sola vez para proyectos que ya
+// existían antes de que este índice existiera (guardados con una versión
+// anterior de la app). Esto sí es lento (lee el contenido completo, igual
+// que antes) pero corre en segundo plano y nunca más de una vez por
+// proyecto — después, idbGuardarProyecto mantiene el índice solo.
+async function migrarIndiceProyectosSiHaceFalta() {
+  try {
+    const [totalCompleto, totalIndice] = await Promise.all([
+      idbContarEnStore(IDB_STORE_PROYECTOS),
+      idbContarEnStore(IDB_STORE_INDICE),
+    ]);
+    if (totalIndice >= totalCompleto) return;
+    const todos = await idbListarProyectos();
+    const db = await abrirIDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE_INDICE, "readwrite");
+      const store = tx.objectStore(IDB_STORE_INDICE);
+      todos.forEach(({ id, data }) => {
+        const info = (data && data.projectInfo) || {};
+        store.put({
+          nombre: info.nombre || "",
+          cliente: info.cliente || "",
+          guardadoEn: data && data.guardadoEn ? data.guardadoEn : null,
+          creadoEn: data && data.creadoEn ? data.creadoEn : null,
+        }, id);
+      });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error("Error al migrar el índice"));
+    });
+  } catch (e) {
+    console.error("No se pudo migrar el índice liviano de proyectos", e);
+  }
+}
+window.idbListarIndiceProyectos = idbListarIndiceProyectos;
+window.migrarIndiceProyectosSiHaceFalta = migrarIndiceProyectosSiHaceFalta;
 function idbLeerProyecto(id) {
   return abrirIDB().then((db) => new Promise((resolve, reject) => {
     const tx = db.transaction(IDB_STORE_PROYECTOS, "readonly");
@@ -938,6 +1028,14 @@ function borrarTodo() {
 async function initApp() {
   const yearEl = document.getElementById("footer-year");
   if (yearEl) yearEl.textContent = new Date().getFullYear();
+
+  // Reconstruye el índice liviano de proyectos si hace falta (proyectos
+  // guardados con una versión anterior de la app, antes de que este
+  // índice existiera). Corre en segundo plano, sin bloquear el arranque
+  // — es lenta solo la primera vez, nunca más después.
+  if (window.migrarIndiceProyectosSiHaceFalta) {
+    window.migrarIndiceProyectosSiHaceFalta().catch(() => {});
+  }
 
   cargarMatricesLocalStorage();
   const cargoEmbebido = cargarDatosEmbebidos();

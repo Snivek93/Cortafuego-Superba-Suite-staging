@@ -846,7 +846,15 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   await cargarEstadoOrganizacion(soloLocal);
 
   let lista = [];
-  try { lista = await window.idbListarProyectos(); } catch (e) { lista = []; }
+  try {
+    // El índice liviano (solo nombre/cliente/fecha) evita leer el
+    // contenido completo de cada proyecto guardado localmente — antes,
+    // idbListarProyectos() cargaba TODAS las fotos de TODOS los proyectos
+    // del dispositivo solo para armar esta lista. Fallback al método
+    // viejo si por algún motivo el índice no está disponible todavía
+    // (versión de archivo-estado-app.js desactualizada).
+    lista = window.idbListarIndiceProyectos ? await window.idbListarIndiceProyectos() : await window.idbListarProyectos();
+  } catch (e) { lista = []; }
 
   const idsCompartidos = new Set();
   const candadosAjenosPorProyecto = {};
@@ -1200,7 +1208,16 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
         ESPACIO_ACTIVO_ID = nuevoId;
         guardarEspacioActivo();
         CARPETA_ACTIVA_ID = null;
-        renderPantallaProyectos(permitirCerrar);
+        // Antes llamaba a renderPantallaProyectos(permitirCerrar) SIN el
+        // segundo parámetro — eso activa el camino completo (soloLocal
+        // undefined = false), esperando 4+ llamadas a Firestore (espacios,
+        // invitaciones, y las 3 consultas de proyectos) ANTES de repintar
+        // nada. Mismo patrón que ya usamos para la apertura inicial de
+        // Proyectos: repintar YA con lo local, sincronizar después.
+        // Kevin, 08/09/2026: "cambiar entre espacios se siente con lag".
+        renderPantallaProyectos(permitirCerrar, true).then(() => {
+          sincronizarProyectosRemotosYActualizar(permitirCerrar);
+        });
       });
     });
     const btnCrearEspacio = document.getElementById("proy-btn-crear-espacio");
