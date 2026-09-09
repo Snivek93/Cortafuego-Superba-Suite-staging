@@ -338,6 +338,120 @@ function construirReportePDF(opciones) {
     });
   }
 
+  // Fotografías del levantamiento (Penetrantes + Juntas), en grilla de 2
+  // por fila, con el detalle de a qué penetrante/junta corresponde debajo
+  // de cada una — agrupadas por zona, igual que las tablas de arriba.
+  // Va DESPUÉS de todo lo demás (tablas + resumen si aplica), como
+  // apéndice final. Aparece en "Levantamiento detallado" e "Informe
+  // completo" (los dos modos con opts.levantamiento=true) — no en
+  // "Resumen" ni "Levantamiento Resumido", que no muestran filas
+  // individuales. Kevin, 08/09/2026: "que se incluyan las fotos al final
+  // del informe detallado, con referencia a los penetrantes".
+  if (opts.levantamiento) {
+    const grupoFotos = (lista, obtenerFotos, obtenerEtiqueta) => {
+      const porZona = new Map();
+      lista.forEach((r) => {
+        const fotos = obtenerFotos(r);
+        if (!fotos || !fotos.length) return;
+        const clave = (r.A || "(sin zona)") + "‖" + (r.B || "");
+        if (!porZona.has(clave)) porZona.set(clave, { zona: r.A || "(sin zona)", nivel: r.B || "", items: [] });
+        porZona.get(clave).items.push({ fotos, etiqueta: obtenerEtiqueta(r) });
+      });
+      return Array.from(porZona.values());
+    };
+
+    const gruposFotosPen = grupoFotos(
+      computed,
+      (r) => r.fotos || (r.foto ? [r.foto] : []),
+      (r) => `${TIPO_LABEL_CORTO[r.L] || r.L} — ${dimensionPenetrantePDF(r).split("\n")[0]}`
+    );
+    const gruposFotosJ = grupoFotos(
+      computedJ_pdf,
+      (r) => r.fotos || (r.foto ? [r.foto] : []),
+      (r) => `Junta ${juntaLabelCorta(r, r.superiorInferior)} — ${barrerasLabelCorto(r.barreras)}`
+    );
+
+    if (gruposFotosPen.length > 0 || gruposFotosJ.length > 0) {
+      asegurarEspacioTabla(3);
+      dibujarTituloSeccion("Fotografías del Levantamiento");
+
+      const gap = 14;
+      const colWidth = (612 - marginL - marginR - gap) / 2;
+      const altoMaxImg = 150;
+      const altoTexto = 24;
+      const altoCelda = altoMaxImg + altoTexto + 10;
+
+      const dibujarSubtitulo = (texto) => {
+        if (y + 16 > safe.bottom) { doc.addPage(); dibujarCabeceraPagina(); y = safe.top; }
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(90, 90, 90);
+        doc.text(texto, marginL, y);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(20, 20, 20);
+        y += 16;
+      };
+
+      const dibujarFotoEnCelda = (dataUrl, etiqueta, col) => {
+        const x = marginL + col * (colWidth + gap);
+        let w = colWidth, h = altoMaxImg;
+        try {
+          const props = doc.getImageProperties(dataUrl);
+          const ratio = props.width / props.height;
+          h = w / ratio;
+          if (h > altoMaxImg) { h = altoMaxImg; w = h * ratio; }
+        } catch (e) {
+          // Si la imagen viene corrupta o en un formato que jsPDF no puede
+          // leer, se salta esa foto puntual en vez de romper todo el PDF.
+          return false;
+        }
+        try {
+          doc.addImage(dataUrl, "JPEG", x, y, w, h, undefined, "FAST");
+        } catch (e) {
+          return false;
+        }
+        doc.setFontSize(8);
+        doc.setTextColor(60, 60, 60);
+        doc.text(etiqueta, x, y + altoMaxImg + 12, { maxWidth: colWidth });
+        doc.setTextColor(20, 20, 20);
+        return true;
+      };
+
+      const dibujarSeccionFotos = (grupos) => {
+        grupos.forEach((g) => {
+          // Reserva título + la primera fila de fotos JUNTOS — mismo
+          // criterio que asegurarEspacioTabla() usa para las tablas: un
+          // título nunca debe quedar solo al final de una página con su
+          // contenido recién en la siguiente. Sin esto, "Fachada — Nivel
+          // N3" podía quedar huérfano al pie de una página mientras sus
+          // fotos aparecían en la página siguiente sin ningún título
+          // visible arriba (encontrado con un PDF real de prueba, no a
+          // simple vista).
+          if (y + 16 + altoCelda > safe.bottom) { doc.addPage(); dibujarCabeceraPagina(); y = safe.top; }
+          dibujarSubtitulo(g.nivel ? `${g.zona} — Nivel ${g.nivel}` : g.zona);
+
+          // Aplana [{fotos:[...], etiqueta}] a una lista de (foto, etiqueta)
+          // para poder acomodar de a 2 por fila sin importar cuántas fotos
+          // tenga cada penetrante/junta individual.
+          const planas = [];
+          g.items.forEach((item) => {
+            item.fotos.forEach((foto) => planas.push({ foto, etiqueta: item.etiqueta }));
+          });
+
+          for (let i = 0; i < planas.length; i += 2) {
+            if (y + altoCelda > safe.bottom) { doc.addPage(); dibujarCabeceraPagina(); y = safe.top; }
+            dibujarFotoEnCelda(planas[i].foto, planas[i].etiqueta, 0);
+            if (planas[i + 1]) dibujarFotoEnCelda(planas[i + 1].foto, planas[i + 1].etiqueta, 1);
+            y += altoCelda;
+          }
+        });
+      };
+
+      dibujarSeccionFotos(gruposFotosPen);
+      dibujarSeccionFotos(gruposFotosJ);
+    }
+  }
+
   // Numeración final de páginas ("Página X de N") ahora que se sabe el total
   const totalPaginas = doc.internal.getNumberOfPages();
   for (let p = 1; p <= totalPaginas; p++) {

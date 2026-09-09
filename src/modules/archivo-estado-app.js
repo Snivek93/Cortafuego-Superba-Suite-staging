@@ -610,7 +610,16 @@ async function traerVersionRemotaYAdoptar(id, remoto) {
     }
     const data = JSON.parse(jsonConImagenes);
     data.id = id;
-    data.guardadoEn = data.guardadoEn || new Date().toISOString();
+    // Antes caía en new Date() cuando el payload no traía guardadoEn
+    // propio (no lo trae — ese campo nunca formó parte del export JSON,
+    // es puramente de almacenamiento local) — eso marcaba CUALQUIER
+    // proyecto recién descargado como "Actualizado hoy" sin importar
+    // cuándo se guardó de verdad. Ahora usa remoto.actualizadoEn (la
+    // fecha real de Firestore) primero, y new Date() solo como último
+    // recurso si ni eso está disponible. Kevin, 08/09/2026: "entrar en un
+    // proyecto ya cambia a Actualizado hoy [...] al rato vuelve a
+    // aparecer la fecha real".
+    data.guardadoEn = data.guardadoEn || remoto.actualizadoEn || new Date().toISOString();
     data.creadoEn = data.creadoEn || data.guardadoEn;
     await idbGuardarProyecto(id, data);
     try { await idbGuardarMetaClave(claveVersionLocal(id), remoto.version); } catch (e2) {}
@@ -1165,6 +1174,7 @@ async function initApp() {
   document.getElementById("btn-export-excel").addEventListener("click", exportarLevantamientoExcel);
   document.getElementById("btn-export-excel-lev-pen").addEventListener("click", exportarLevantamientoPenetrantesExcel);
   document.getElementById("btn-export-excel-lev-juntas").addEventListener("click", exportarLevantamientoJuntasExcel);
+  document.getElementById("btn-export-fotos-zip").addEventListener("click", exportarFotosLevantamientoZip);
   document.getElementById("file-import-json").addEventListener("change", (e) => {
     if (e.target.files[0]) importarProyectoJSON(e.target.files[0]);
     e.target.value = "";

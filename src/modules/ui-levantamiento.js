@@ -540,6 +540,84 @@ function agruparJuntasPorZona() {
   return grupos;
 }
 
+// ============================================================================
+// Descargar en ZIP todas las fotos guardadas en el levantamiento
+// (Penetrantes + Juntas), organizadas en carpetas por zona/nivel, con el
+// penetrante o junta en el nombre de cada foto. Usa el escritor de ZIP
+// propio (zip-writer.js) — sin librería externa. Vive acá (no en
+// excel-export-import.js, donde se puso al principio por cercanía con las
+// otras exportaciones de levantamiento) porque no tiene nada que ver con
+// Excel — esto es levantamiento y fotos, mismo dueño que
+// agruparPorZona()/agruparJuntasPorZona() de arriba. Kevin, 08/09/2026.
+// ============================================================================
+function exportarFotosLevantamientoZip() {
+  if (!window.construirZip || !window.base64ADatosBinarios || !window.nombreDeArchivoSeguro) {
+    mostrarToast("No se pudo generar el ZIP (falta el módulo zip-writer.js).", "error");
+    return;
+  }
+  const archivos = [];
+  let totalFotos = 0;
+
+  agruparPorZona().forEach((g) => {
+    const carpeta = nombreDeArchivoSeguro(g.zona);
+    let idx = 0;
+    g.items.forEach((r) => {
+      idx++;
+      const fotos = r.fotos || (r.foto ? [r.foto] : []);
+      if (!fotos.length) return;
+      const etiqueta = nombreDeArchivoSeguro(`${idx}. ${TIPO_LABEL_CORTO[r.L] || r.L}`);
+      fotos.forEach((foto, i) => {
+        try {
+          const datos = window.base64ADatosBinarios(foto);
+          archivos.push({ ruta: `Penetrantes/${carpeta}/${etiqueta} - foto${i + 1}.jpg`, datos });
+          totalFotos++;
+        } catch (e) {
+          console.error("No se pudo procesar una foto de penetrante para el ZIP", e);
+        }
+      });
+    });
+  });
+
+  agruparJuntasPorZona().forEach((g) => {
+    const carpeta = nombreDeArchivoSeguro(g.zona);
+    let idx = 0;
+    g.items.forEach((r) => {
+      idx++;
+      const fotos = r.fotos || (r.foto ? [r.foto] : []);
+      if (!fotos.length) return;
+      const etiqueta = nombreDeArchivoSeguro(`${idx}. Junta ${r.tipo || ""}`.trim());
+      fotos.forEach((foto, i) => {
+        try {
+          const datos = window.base64ADatosBinarios(foto);
+          archivos.push({ ruta: `Juntas/${carpeta}/${etiqueta} - foto${i + 1}.jpg`, datos });
+          totalFotos++;
+        } catch (e) {
+          console.error("No se pudo procesar una foto de junta para el ZIP", e);
+        }
+      });
+    });
+  });
+
+  if (archivos.length === 0) {
+    mostrarToast("No hay fotos guardadas en el levantamiento todavía.", "error");
+    return;
+  }
+
+  const zipBytes = window.construirZip(archivos);
+  const blob = new Blob([zipBytes], { type: "application/zip" });
+  const url = URL.createObjectURL(blob);
+  const nombreProy = (PROJECT_INFO && PROJECT_INFO.nombre) ? PROJECT_INFO.nombre.trim() : "";
+  const nombreArchivo = (nombreDeArchivoSeguro(nombreProy || "proyecto").replace(/\s+/g, "-") || "proyecto") + "-fotos-levantamiento.zip";
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombreArchivo;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  mostrarToast(`ZIP generado: ${totalFotos} foto(s).`);
+}
+
 function describirItemLevJ(r) {
   const c = computeSingleJuntaRow(r);
   const posTxt = c.superiorInferior ? ` · ${r.posicionPI}` : (r.posicion ? ` · ${r.posicion}` : "");
@@ -1944,6 +2022,7 @@ window.levUsaDiametroLibre = levUsaDiametroLibre;
 window.TIPO_LABEL_CORTO = TIPO_LABEL_CORTO;
 window.barrerasLabelCorto = barrerasLabelCorto;
 window.agruparJuntasPorZona = agruparJuntasPorZona;
+window.exportarFotosLevantamientoZip = exportarFotosLevantamientoZip;
 window.abrirLevantamiento = abrirLevantamiento;
 window.getLevMode = () => LEV_MODE;
 window.abrirLevantamientoJuntas = abrirLevantamientoJuntas;
