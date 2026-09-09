@@ -1205,19 +1205,31 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
       btnItem.addEventListener("click", () => {
         const nuevoId = btnItem.getAttribute("data-espacio-id") || null;
         if (nuevoId === ESPACIO_ACTIVO_ID) { dropdownEspacio.classList.remove("open"); return; }
-        ESPACIO_ACTIVO_ID = nuevoId;
-        guardarEspacioActivo();
-        CARPETA_ACTIVA_ID = null;
-        // Antes llamaba a renderPantallaProyectos(permitirCerrar) SIN el
-        // segundo parámetro — eso activa el camino completo (soloLocal
-        // undefined = false), esperando 4+ llamadas a Firestore (espacios,
-        // invitaciones, y las 3 consultas de proyectos) ANTES de repintar
-        // nada. Mismo patrón que ya usamos para la apertura inicial de
-        // Proyectos: repintar YA con lo local, sincronizar después.
-        // Kevin, 08/09/2026: "cambiar entre espacios se siente con lag".
-        renderPantallaProyectos(permitirCerrar, true).then(() => {
-          sincronizarProyectosRemotosYActualizar(permitirCerrar);
-        });
+        // Cierra el menú con una transición corta ANTES de cambiar de
+        // espacio, en vez de dejarlo desaparecer de golpe como efecto
+        // secundario de reconstruir toda la pantalla (que antes pasaba
+        // desapercibido porque el render tardaba, y ahora que es
+        // instantáneo se nota como un "corte"). Transición inline, no
+        // toca la clase .dropdown-panel compartida con otros menús.
+        // Kevin, 08/09/2026: "se cierra de golpe".
+        dropdownEspacio.style.transition = "opacity .15s ease, transform .15s ease";
+        dropdownEspacio.style.opacity = "0";
+        dropdownEspacio.style.transform = "translateY(-6px) scale(0.98)";
+        setTimeout(() => {
+          ESPACIO_ACTIVO_ID = nuevoId;
+          guardarEspacioActivo();
+          CARPETA_ACTIVA_ID = null;
+          // Antes llamaba a renderPantallaProyectos(permitirCerrar) SIN el
+          // segundo parámetro — eso activa el camino completo (soloLocal
+          // undefined = false), esperando 4+ llamadas a Firestore (espacios,
+          // invitaciones, y las 3 consultas de proyectos) ANTES de repintar
+          // nada. Mismo patrón que ya usamos para la apertura inicial de
+          // Proyectos: repintar YA con lo local, sincronizar después.
+          // Kevin, 08/09/2026: "cambiar entre espacios se siente con lag".
+          renderPantallaProyectos(permitirCerrar, true).then(() => {
+            sincronizarProyectosRemotosYActualizar(permitirCerrar);
+          });
+        }, 150);
       });
     });
     const btnCrearEspacio = document.getElementById("proy-btn-crear-espacio");
