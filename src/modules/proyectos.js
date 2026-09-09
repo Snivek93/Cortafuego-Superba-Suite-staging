@@ -787,70 +787,57 @@ function crearOverlaySiHaceFalta() {
   return el;
 }
 
-// Cubre los DOS bugs de sincronización entre dispositivos a la vez.
-// - Bug 1 (proyecto invisible en otro dispositivo): si el proyecto no
-//   existe localmente todavía, lo descarga y lo guarda — antes solo lo
-//   hacían los bloques de "compartidos conmigo" y "proyectos del
-//   espacio"; al bloque de "todos mis proyectos" (fsListarMisProyectosCompartidos,
-//   nombre engañoso — en realidad trae TODOS los proyectos por ownerId,
-//   no solo los compartidos) le faltaba ese paso por completo.
-// - Bug 2 (tarjeta con fecha vieja): si el proyecto YA existe localmente
-//   pero la versión de Firestore es más nueva (comparando el mismo
-//   "fsVersionLocal:<id>" que ya usa detectarSiEsCompartido() al abrir un
-//   proyecto), lo vuelve a descargar. Antes, los 3 bloques ignoraban por
-//   completo cualquier proyecto ya conocido sin importar qué tan vieja
-//   fuera la copia local — nunca se refrescaba desde la lista, solo al
-//   abrirlo puntualmente.
-// Kevin, 08/09/2026: "cargué Tibas en la laptop, no sale en el celular
-// [...] UCR Golfito y Demasa actualizados hoy, en el celular hace 5 días".
-async function refrescarSiHayVersionMasNueva(doc, lista) {
+// Actualiza SOLO lo que se ve en la tarjeta de la lista (nombre, cliente,
+// fecha) usando los campos livianos que las 3 consultas de listado YA
+// traen — nunca descarga el contenido completo (fotos incluidas) solo
+// por mostrar la lista. Esa es la idea original: cualquier cuenta del
+// espacio ve que el proyecto existe, pero el contenido real solo se
+// descarga cuando de verdad se abre (ver abrirProyectoExistente() en
+// archivo-estado-app.js, que ahora sabe manejar ese momento).
+// Si el proyecto nunca se abrió en este dispositivo, arma una entrada
+// "vitrina" (marcada con _sinDescargar) solo para que aparezca en la
+// lista — sin guardarla en IndexedDB, porque no hay contenido real
+// todavía. Si ya existía localmente, solo se refrescan nombre/cliente/
+// fecha para que la tarjeta no mienta; el contenido real (lo que se usa
+// al trabajar dentro del proyecto) no se toca acá.
+// Kevin, 08/09/2026: "la idea original era: se ven los 10 proyectos del
+// espacio, pero no se descargan hasta que se abren".
+function actualizarMetadataListadoSiHaceFalta(doc, lista) {
   const id = doc.id;
   // El proyecto activamente abierto en ESTE dispositivo ahora mismo no se
   // toca acá — su propia sincronización la maneja detectarSiEsCompartido()
-  // al abrirlo. Refrescar su caché por atrás, sin que la pantalla lo
-  // sepa, podría hacer que una edición en curso se guarde encima de la
-  // versión recién bajada.
+  // al abrirlo.
   if (window.PROYECTO_ACTIVO_ID === id) return;
-  // doc viene tal cual de una consulta de LISTADO (documento liviano): el
-  // campo real de versión ahí es versionSync, no version.
-  const versionRemotaConocida = doc.versionSync || 0;
-  if (!doc.tieneContenido && !doc.payloadJson) return; // de verdad no hay nada que traer todavía
-  if (!window.fsDescargarUltimaVersion) return;
-  let versionLocalConocida = null;
-  try {
-    versionLocalConocida = window.idbLeerMetaClave ? await window.idbLeerMetaClave("fsVersionLocal:" + id) : null;
-  } catch (e) {
-    return;
+  if (!doc.tieneContenido && !doc.nombre) return; // de verdad no hay nada que mostrar todavía
+  let guardadoEnISO = null;
+  if (doc.actualizadoEn) {
+    guardadoEnISO = (typeof doc.actualizadoEn.toDate === "function") ? doc.actualizadoEn.toDate().toISOString() : doc.actualizadoEn;
   }
-  if (versionLocalConocida !== null && versionLocalConocida === versionRemotaConocida) return; // ya está al día
-  try {
-    // fsDescargarUltimaVersion ya sabe leer el esquema liviano O el pesado
-    // (subcolección contenido/data) — es la misma función que usa
-    // detectarSiEsCompartido() al abrir un proyecto puntual.
-    const remoto = await window.fsDescargarUltimaVersion(id);
-    if (!remoto || !remoto.payloadJson) return;
-    let jsonConImagenes = remoto.payloadJson;
-    if (remoto.imagenesUrls && Object.keys(remoto.imagenesUrls).length > 0 && window.fsDescargarImagenesComoJson && window.reinsertarImagenesGrandes) {
-      try {
-        const imagenesJson = await window.fsDescargarImagenesComoJson(remoto.imagenesUrls);
-        jsonConImagenes = window.reinsertarImagenesGrandes(remoto.payloadJson, imagenesJson);
-      } catch (e2) {
-        console.error("No se pudieron bajar las fotos al refrescar", id, e2);
-      }
+  const idx = lista.findIndex((p) => p.id === id);
+  if (idx === -1) {
+    lista.push({
+      id,
+      data: {
+        projectInfo: { nombre: doc.nombre || "", cliente: doc.cliente || "" },
+        guardadoEn: guardadoEnISO,
+        creadoEn: guardadoEnISO,
+        _sinDescargar: true,
+      },
+    });
+  } else {
+    const actual = lista[idx].data;
+    if (actual && !actual._sinDescargar) {
+      lista[idx] = {
+        id,
+        data: Object.assign({}, actual, {
+          projectInfo: Object.assign({}, actual.projectInfo, {
+            nombre: doc.nombre || (actual.projectInfo && actual.projectInfo.nombre) || "",
+            cliente: doc.cliente || (actual.projectInfo && actual.projectInfo.cliente) || "",
+          }),
+          guardadoEn: guardadoEnISO || actual.guardadoEn,
+        }),
+      };
     }
-    const data = JSON.parse(jsonConImagenes);
-    data.id = id;
-    data.guardadoEn = data.guardadoEn || new Date().toISOString();
-    data.creadoEn = data.creadoEn || data.guardadoEn;
-    await window.idbGuardarProyecto(id, data);
-    if (window.idbGuardarMetaClave) {
-      try { await window.idbGuardarMetaClave("fsVersionLocal:" + id, remoto.version); } catch (e3) {}
-    }
-    const idx = lista.findIndex((p) => p.id === id);
-    if (idx >= 0) lista[idx] = { id, data };
-    else lista.push({ id, data });
-  } catch (e) {
-    console.error("No se pudo refrescar el proyecto", id, e);
   }
 }
 
@@ -891,14 +878,13 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
         ]);
       }
       const remotos = await window.fsListarProyectosCompartidosConmigo(user.uid);
-      const idsLocales = new Set(lista.map((p) => p.id));
       for (const remoto of remotos) {
         idsCompartidos.add(remoto.id);
         espacioIdConocido[remoto.id] = remoto.espacioId || null;
         ESPACIO_POR_PROYECTO_LOCAL[remoto.id] = remoto.espacioId || null;
         permisoEdicionConocido[remoto.id] = true; // llegó acá vía editoresUids array-contains: por definición puede editar
         registrarCandadoAjeno(remoto);
-        await refrescarSiHayVersionMasNueva(remoto, lista);
+        actualizarMetadataListadoSiHaceFalta(remoto, lista);
       }
     } catch (e) {
     }
@@ -912,7 +898,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
         espacioIdConocido[doc.id] = doc.espacioId || null;
         ESPACIO_POR_PROYECTO_LOCAL[doc.id] = doc.espacioId || null;
         permisoEdicionConocido[doc.id] = true;
-        await refrescarSiHayVersionMasNueva(doc, lista);
+        actualizarMetadataListadoSiHaceFalta(doc, lista);
       }
     } catch (e) {
     }
@@ -921,7 +907,6 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   if (!soloLocal && ESPACIO_ACTIVO_ID && window.fsListarProyectosDeEspacio) {
     try {
       const deEspacio = await window.fsListarProyectosDeEspacio(ESPACIO_ACTIVO_ID);
-      const idsLocalesEspacio = new Set(lista.map((p) => p.id));
       for (const doc of deEspacio) {
         espacioIdConocido[doc.id] = ESPACIO_ACTIVO_ID;
         ESPACIO_POR_PROYECTO_LOCAL[doc.id] = ESPACIO_ACTIVO_ID;
@@ -929,7 +914,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
         const esDuenoDeEste = !!(user && doc.ownerId === user.uid);
         if (!esDuenoDeEste) idsCompartidos.add(doc.id);
         permisoEdicionConocido[doc.id] = esDuenoDeEste || (Array.isArray(doc.editoresUids) && !!user && doc.editoresUids.includes(user.uid));
-        await refrescarSiHayVersionMasNueva(doc, lista);
+        actualizarMetadataListadoSiHaceFalta(doc, lista);
       }
     } catch (e) {
     }

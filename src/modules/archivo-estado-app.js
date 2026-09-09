@@ -515,6 +515,26 @@ function cargarProyectoEnApp(data) {
   mostrarVistaProyecto();
 }
 
+// Barra animada de carga (no un spinner) para cuando hay que descargar un
+// proyecto que nunca se abrió en este dispositivo — Kevin, 08/09/2026:
+// "¿cómo mostramos la espera al abrir un proyecto que nunca se descargó?
+// una barra como de cargando".
+function mostrarBarraDescargandoProyecto() {
+  if (document.getElementById("proy-descarga-overlay")) return;
+  const el = document.createElement("div");
+  el.id = "proy-descarga-overlay";
+  el.className = "proy-descarga-overlay";
+  el.innerHTML = `
+    <p class="proy-descarga-texto">Descargando proyecto…</p>
+    <div class="proy-descarga-barra-pista"><div class="proy-descarga-barra-relleno"></div></div>
+  `;
+  document.body.appendChild(el);
+}
+function ocultarBarraDescargandoProyecto() {
+  const el = document.getElementById("proy-descarga-overlay");
+  if (el) el.remove();
+}
+
 async function abrirProyectoExistente(id) {
   soltarCandadoActivoSiHaceFalta();
   let data = null;
@@ -524,7 +544,42 @@ async function abrirProyectoExistente(id) {
     avisarFalloGuardado(e);
     return false;
   }
-  if (!data) return false;
+  if (!data) {
+    // Nunca se abrió en este dispositivo — la Pantalla de Proyectos lo
+    // mostró solo con datos livianos (nombre/cliente/fecha), sin
+    // contenido real todavía (ver actualizarMetadataListadoSiHaceFalta en
+    // proyectos.js). Se trae ahora, completo, mostrando la barra de carga
+    // mientras tanto. Reusa traerVersionRemotaYAdoptar — la misma función
+    // que ya se usa cuando detectarSiEsCompartido() encuentra una versión
+    // más nueva en otro dispositivo.
+    if (!window.fsDescargarUltimaVersion) return false;
+    mostrarBarraDescargandoProyecto();
+    try {
+      const remoto = await window.fsDescargarUltimaVersion(id);
+      if (!remoto || !remoto.payloadJson) {
+        ocultarBarraDescargandoProyecto();
+        mostrarToast("No se pudo descargar el proyecto. Revisá tu conexión.", "error");
+        return false;
+      }
+      const ok = await traerVersionRemotaYAdoptar(id, remoto);
+      ocultarBarraDescargandoProyecto();
+      if (!ok) {
+        mostrarToast("No se pudo descargar el proyecto.", "error");
+        return false;
+      }
+    } catch (e) {
+      ocultarBarraDescargandoProyecto();
+      mostrarToast("No se pudo descargar el proyecto. Revisá tu conexión.", "error");
+      return false;
+    }
+    try {
+      data = await idbLeerProyecto(id);
+    } catch (e) {
+      avisarFalloGuardado(e);
+      return false;
+    }
+    if (!data) return false;
+  }
   PROYECTO_ACTIVO_ID = id;
   PROYECTO_ACTIVO_CREADO_EN = data.creadoEn || data.guardadoEn || new Date().toISOString();
   PROYECTO_ACTIVO_HUBO_EDICION = false;

@@ -326,9 +326,30 @@ function fsEscucharProyecto(proyectoId, callback) {
   return () => { cancelado = true; if (unsub) unsub(); };
 }
 
+// Extrae nombre/cliente/fecha del payload para mantener el documento
+// LIVIANO (el que se usa para LISTAR proyectos, ver el esquema al inicio
+// de este archivo) siempre al día — sin esto, esos 3 campos solo se
+// escribían una vez al crear el proyecto (fsAsegurarProyecto) y nunca
+// más, así que un proyecto con contenido pesado podía tener nombre y
+// cliente vacíos PARA SIEMPRE en el documento liviano aunque el usuario
+// le hubiera puesto nombre hace rato. Kevin, 08/09/2026: "cargué Tibas en
+// la laptop, no sale en el celular" — Tibas SÍ estaba en Firestore, con
+// el espacio correcto, pero el documento liviano nunca se enteró de que
+// ya tenía nombre real.
+function extraerDatosLivianosDePayload(payloadJson) {
+  try {
+    const parsed = JSON.parse(payloadJson);
+    const info = (parsed && parsed.projectInfo) || {};
+    return { nombre: info.nombre || "", cliente: info.cliente || "", fecha: info.fecha || "" };
+  } catch (e) {
+    return { nombre: "", cliente: "", fecha: "" };
+  }
+}
+
 async function fsSubirCambios(proyectoId, payloadJson, versionEsperada, imagenesUrls) {
   const ref = db().collection("proyectos").doc(proyectoId);
   const contRef = ref.collection("contenido").doc("data");
+  const { nombre, cliente, fecha } = extraerDatosLivianosDePayload(payloadJson);
   return db().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) return { ok: false, conflicto: false, error: "El proyecto no existe en Firestore." };
@@ -348,6 +369,7 @@ async function fsSubirCambios(proyectoId, payloadJson, versionEsperada, imagenes
       versionSync: versionNueva,
       tieneContenido: true,
       actualizadoEn: firebase.firestore.FieldValue.serverTimestamp(),
+      nombre, cliente, fecha,
       payloadJson: firebase.firestore.FieldValue.delete(),
       imagenesUrls: firebase.firestore.FieldValue.delete(),
     });
