@@ -1029,6 +1029,31 @@ async function initApp() {
   const yearEl = document.getElementById("footer-year");
   if (yearEl) yearEl.textContent = new Date().getFullYear();
 
+  // Mueve el mismo nodo .header-actions (Proyectos/Archivo/PDF/guardado/
+  // configuración) entre el header (mobile, solo íconos) y la barra nueva
+  // debajo del header (desktop, con texto) según el ancho — nunca lo
+  // duplica, así que todos los listeners que ya se cablean más abajo
+  // siguen funcionando sin importar dónde viva el nodo en cada momento.
+  // Kevin, 08/09/2026: "en desktop debería estar mejor ubicado debajo del
+  // header, no en el header".
+  (function () {
+    const acciones = document.querySelector(".header-actions");
+    const anclaMobile = document.getElementById("header-actions-anchor-mobile");
+    const barraDesktop = document.getElementById("header-actions-bar");
+    if (!acciones || !anclaMobile || !barraDesktop) return;
+    const mq = window.matchMedia("(min-width: 701px)");
+    function moverAccionesSegunAncho() {
+      if (mq.matches) {
+        if (acciones.parentElement !== barraDesktop) barraDesktop.appendChild(acciones);
+      } else {
+        if (acciones.previousElementSibling !== anclaMobile) anclaMobile.after(acciones);
+      }
+    }
+    moverAccionesSegunAncho();
+    if (mq.addEventListener) mq.addEventListener("change", moverAccionesSegunAncho);
+    else if (mq.addListener) mq.addListener(moverAccionesSegunAncho); // Safari viejo
+  })();
+
   // Reconstruye el índice liviano de proyectos si hace falta (proyectos
   // guardados con una versión anterior de la app, antes de que este
   // índice existiera). Corre en segundo plano, sin bloquear el arranque
