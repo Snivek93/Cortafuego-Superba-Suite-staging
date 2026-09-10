@@ -1297,7 +1297,14 @@ async function initApp() {
   document.getElementById("btn-export-excel").addEventListener("click", exportarLevantamientoExcel);
   document.getElementById("btn-export-excel-lev-pen").addEventListener("click", exportarLevantamientoPenetrantesExcel);
   document.getElementById("btn-export-excel-lev-juntas").addEventListener("click", exportarLevantamientoJuntasExcel);
-  document.getElementById("btn-export-fotos-zip").addEventListener("click", exportarFotosLevantamientoZip);
+  // Protegido con chequeo de null: si este botón alguna vez falta del
+  // HTML (como pasó hoy — armé un parche de index.html a partir de una
+  // copia vieja que no lo tenía todavía), un getElementById().addEventListener()
+  // directo sin chequear explota AQUÍ y tumba TODO initApp() de ahí para
+  // abajo — incluido lo que oculta la pantalla de carga. Por eso la app se
+  // quedaba en el splash y después en negro. Kevin, 08/09/2026.
+  const btnExportZip = document.getElementById("btn-export-fotos-zip");
+  if (btnExportZip) btnExportZip.addEventListener("click", exportarFotosLevantamientoZip);
   document.getElementById("file-import-json").addEventListener("change", (e) => {
     if (e.target.files[0]) importarProyectoJSON(e.target.files[0]);
     e.target.value = "";
