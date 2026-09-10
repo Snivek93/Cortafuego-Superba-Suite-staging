@@ -895,6 +895,12 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
         actualizarMetadataListadoSiHaceFalta(remoto, lista);
       }
     } catch (e) {
+      // Antes este catch estaba vacío — si esta consulta fallaba por
+      // CUALQUIER motivo (permiso, red, lo que sea), un proyecto entero
+      // podía desaparecer de la lista sin dejar ningún rastro, ni para
+      // Kevin ni para nadie revisando después. Kevin, 08/09/2026: "no
+      // podemos seguir asumiendo que todo es caché".
+      console.error("No se pudieron traer los proyectos compartidos conmigo (editoresUids)", e);
     }
   }
 
@@ -909,6 +915,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
         actualizarMetadataListadoSiHaceFalta(doc, lista);
       }
     } catch (e) {
+      console.error("No se pudieron traer mis proyectos (ownerId)", e);
     }
   }
 
@@ -925,6 +932,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
         actualizarMetadataListadoSiHaceFalta(doc, lista);
       }
     } catch (e) {
+      console.error("No se pudieron traer los proyectos del espacio activo (" + ESPACIO_ACTIVO_ID + ")", e);
     }
   }
 
@@ -1016,11 +1024,13 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
       ${popupCuentaHTML()}
     </div>
     <div class="proy-body-full">
-      ${breadcrumb}
-      ${seccionProyectos}
-      ${btnNuevaCarpeta}
-      ${seccionBorradores}
-      ${vacio}
+      <div class="proy-body-full-inner">
+        ${breadcrumb}
+        ${seccionProyectos}
+        ${btnNuevaCarpeta}
+        ${seccionBorradores}
+        ${vacio}
+      </div>
     </div>
     <div class="proy-fab-wrap">
       <div class="proy-fab-menu" id="proy-fab-menu">
