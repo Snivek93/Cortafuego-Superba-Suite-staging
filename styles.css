@@ -70,6 +70,40 @@ header.app-header h1 { font-size: var(--fs-md); margin: 0; font-weight: 600; let
 .header-project-fields input[type="date"] { width: 130px; }
 .header-actions { margin-left: 0; display: flex; justify-content: flex-start; gap: 4px; align-items: center; flex-wrap: wrap; row-gap: 6px; width: 100%; }
 .header-icon-btn { background: transparent; border: none; padding: 8px; border-radius: var(--radius-sm); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: #ffffff; flex-shrink: 0; transition: transform .1s ease, background-color .1s ease; }
+/* Botón de "Proyectos", "Archivo" y "PDF" traen su texto (.btn-label) y su
+   flecha (.icon-chevron) siempre en el HTML — se ocultan acá por defecto
+   (mobile/header oscuro sigue solo-ícono como siempre) y se muestran
+   únicamente dentro de #header-actions-bar (desktop), reusando el mismo
+   patrón .btn-label que ya existía para otros botones de la app. */
+.header-icon-btn .btn-label { display: none; }
+.header-icon-btn .icon-chevron { display: none; }
+
+/* Barra de acciones de escritorio — Kevin, 08/09/2026: "en desktop
+   debería estar mejor ubicado debajo del header, no en el header, y
+   podría verse más letras como proyectos, archivo y pdf con símbolos".
+   El contenido de esta barra NO es HTML propio: es el MISMO nodo
+   .header-actions que en mobile vive dentro del header, movido acá por
+   JS (ver moverAccionesSegunAncho() en archivo-estado-app.js) — mismos
+   botones, mismos IDs, mismos listeners, solo cambia dónde vive en el
+   DOM según el ancho. Oculta por defecto (mobile no la usa en absoluto). */
+.header-actions-bar { display: none; }
+@media (min-width: 701px) {
+  .header-actions-bar {
+    display: flex;
+    align-items: center;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 6px var(--edge-pad);
+  }
+  .header-actions-bar .header-actions { width: 100%; margin-left: 0; flex-wrap: nowrap; }
+  .header-actions-bar .header-icon-btn { color: var(--ink); padding: 8px 12px; gap: 6px; }
+  .header-actions-bar .header-icon-btn .btn-label { display: inline; font-size: var(--fs-sm); font-weight: 600; }
+  .header-actions-bar .header-icon-btn .icon-chevron { display: inline-block; width: 12px; height: 12px; margin-left: 2px; color: var(--text-muted); }
+  .header-actions-bar .header-icon-btn .icon { margin-right: 0; }
+  @media (hover: hover) and (pointer: fine) { .header-actions-bar .header-icon-btn:hover { background: var(--grey-1); } }
+  .header-actions-bar #btn-configuracion { color: var(--ink); background: var(--surface-raised); border: 1px solid var(--border); }
+  .header-actions-bar .save-status { color: var(--text-muted); }
+}
 .header-icon-btn:active { transform: scale(0.88); background: rgba(255,255,255,0.18); }
 .header-icon-btn .icon { width: 21px; height: 21px; margin-right: 0; }
 @media (hover: hover) and (pointer: fine) { .header-icon-btn:hover { background: rgba(255,255,255,0.1); } }

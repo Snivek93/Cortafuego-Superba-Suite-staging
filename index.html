@@ -170,10 +170,11 @@
     <input type="text" id="proj-cliente" placeholder="Cliente">
     <input type="date" id="proj-fecha">
   </div>
+  <div id="header-actions-anchor-mobile"></div>
   <div class="header-actions">
-    <button class="header-icon-btn" id="btn-home" title="Proyectos" aria-label="Proyectos"><svg class="icon"><use href="#i-home"/></svg></button>
+    <button class="header-icon-btn" id="btn-home" title="Proyectos" aria-label="Proyectos"><svg class="icon"><use href="#i-home"/></svg><span class="btn-label">Proyectos</span></button>
     <div class="dropdown" id="dropdown-proyecto">
-      <button class="header-icon-btn" id="btn-menu-proyecto" title="Archivo" aria-label="Archivo"><svg class="icon"><use href="#i-folder"/></svg></button>
+      <button class="header-icon-btn" id="btn-menu-proyecto" title="Archivo" aria-label="Archivo"><svg class="icon"><use href="#i-folder"/></svg><span class="btn-label">Archivo</span><svg class="icon icon-chevron"><use href="#i-chevron-down"/></svg></button>
       <div class="dropdown-panel" id="dropdown-panel-proyecto">
         <button class="dropdown-item" id="btn-archivo-nuevo"><svg class="icon"><use href="#i-plus"/></svg>Nuevo proyecto</button>
         <div class="dropdown-sep"></div>
@@ -187,15 +188,13 @@
           <button class="dropdown-item" id="btn-export-excel"><svg class="icon"><use href="#i-download"/></svg>Exportar Penetrantes</button>
           <button class="dropdown-item" id="btn-export-excel-lev-pen"><svg class="icon"><use href="#i-download"/></svg>Exportar Lev. Penetrantes</button>
           <button class="dropdown-item" id="btn-export-excel-lev-juntas"><svg class="icon"><use href="#i-download"/></svg>Exportar Lev. Juntas</button>
-          <div class="dropdown-sep"></div>
-          <button class="dropdown-item" id="btn-export-fotos-zip"><svg class="icon"><use href="#i-download"/></svg>Descargar fotos (ZIP)</button>
         </div>
       </div>
       <input type="file" id="file-import-json" accept=".fss,.json,application/octet-stream,application/json,text/plain" hidden>
       <input type="file" id="file-import-excel" accept=".xlsx,.xlsm,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12,application/vnd.ms-excel" hidden>
     </div>
     <div class="dropdown" id="dropdown-pdf">
-      <button class="header-icon-btn" id="btn-menu-pdf" title="PDF" aria-label="PDF"><svg class="icon"><use href="#i-download"/></svg></button>
+      <button class="header-icon-btn" id="btn-menu-pdf" title="PDF" aria-label="PDF"><svg class="icon"><use href="#i-download"/></svg><span class="btn-label">PDF</span><svg class="icon icon-chevron"><use href="#i-chevron-down"/></svg></button>
       <div class="dropdown-panel" id="dropdown-panel-pdf">
         <p class="dropdown-section-title">Informes</p>
         <button class="dropdown-item dropdown-item-share" id="btn-pdf-completo"><svg class="icon"><use href="#i-download"/></svg>Informe completo<svg class="icon icon-share"><use href="#i-share"/></svg></button>
@@ -220,6 +219,8 @@
     </span>
   </div>
 </header>
+
+<div class="header-actions-bar" id="header-actions-bar"></div>
 
 <div class="lev-launch-bar">
   <button type="button" id="btn-abrir-levantamiento" class="lev-launch-btn"><svg class="icon"><use href="#i-clipboard-list"/></svg><span class="lev-launch-label-full">Levantamiento Penetrantes</span><span class="lev-launch-label-short">Penetr.</span></button>
@@ -727,7 +728,6 @@
 <script src="src/modules/firestore-sync.js"></script>
 <script src="src/modules/firestore-storage-sync.js"></script>
 <script src="src/modules/archivo-estado-app.js"></script>
-<script src="src/modules/zip-writer.js"></script>
 <script src="src/modules/proyectos.js"></script>
 <script src="src/modules/tema-claro-oscuro.js"></script>
 <script src="src/modules/compartir-tabla-imagen.js"></script>
