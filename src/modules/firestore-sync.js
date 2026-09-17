@@ -145,6 +145,16 @@ async function fsQuitarAcceso(proyectoId, uid) {
   });
 }
 
+// Lee el array real de editoresUids DIRECTO de Firestore (no del índice
+// liviano local, que no lo guarda) — se usa al abrir el modal de "Permisos"
+// para mostrar quién puede editar ahora mismo, sin depender de un dato
+// cacheado que podría estar desactualizado.
+async function fsObtenerEditoresProyecto(proyectoId) {
+  const snap = await db().collection("proyectos").doc(proyectoId).get();
+  if (!snap.exists) return [];
+  return snap.data().editoresUids || [];
+}
+
 async function fsListarProyectosCompartidosConmigo(uid) {
   const q = await db().collection("proyectos").where("editoresUids", "array-contains", uid).get();
   return q.docs.map((d) => Object.assign({ id: d.id }, d.data()));
@@ -226,6 +236,30 @@ async function fsListarInvitacionesPendientes(email) {
   const snap = await db().collection("invitacionesEspacio").doc(emailId).get();
   if (!snap.exists) return [];
   return snap.data().pendientes || [];
+}
+
+// Escucha en VIVO las invitaciones pendientes de este correo (proyecto Y
+// espacio) — antes solo se leían una vez (fsListarInvitacionesPendientes,
+// y el resolver de invitaciones de proyecto en firebase-auth.js), así que
+// una invitación creada MIENTRAS la persona ya tenía la app abierta no se
+// notaba hasta recargar. callback(tipo, pendientes) se llama con
+// tipo="proyecto" o tipo="espacio" cada vez que cambia esa lista — incluida
+// la primera vez, con el estado ya existente al momento de suscribirse.
+// Devuelve una función para dejar de escuchar.
+// Kevin, 08/09/2026: "si yo invito a alguien a un proyecto esta persona no
+// se da cuenta hasta que recargue".
+function fsEscucharInvitaciones(email, callback) {
+  if (!email) return () => {};
+  const emailId = sanitizarEmailComoId(email);
+  const unsub1 = db().collection("invitaciones").doc(emailId).onSnapshot(
+    (snap) => callback("proyecto", snap.exists ? (snap.data().pendientes || []) : []),
+    (err) => console.error("Error escuchando invitaciones de proyecto en vivo", err)
+  );
+  const unsub2 = db().collection("invitacionesEspacio").doc(emailId).onSnapshot(
+    (snap) => callback("espacio", snap.exists ? (snap.data().pendientes || []) : []),
+    (err) => console.error("Error escuchando invitaciones de espacio en vivo", err)
+  );
+  return () => { unsub1(); unsub2(); };
 }
 
 // Renombra un espacio — cualquier miembro puede (mismo criterio simple que
@@ -399,6 +433,12 @@ async function fsDescargarUltimaVersion(proyectoId) {
     imagenesUrls,
     editoresUids: data.editoresUids || [],
     ownerId: data.ownerId || null,
+    // La fecha REAL del último guardado en Firestore — sin esto,
+    // traerVersionRemotaYAdoptar() no tenía forma de saber cuándo se
+    // guardó de verdad y caía en "ahora mismo" como reemplazo, marcando
+    // "Actualizado hoy" en cualquier proyecto recién descargado aunque no
+    // se hubiera tocado nada. Kevin, 08/09/2026.
+    actualizadoEn: (data.actualizadoEn && typeof data.actualizadoEn.toDate === "function") ? data.actualizadoEn.toDate().toISOString() : (data.actualizadoEn || null),
   };
 }
 
@@ -406,6 +446,7 @@ window.fsAsegurarProyecto = fsAsegurarProyecto;
 window.fsCompartirProyecto = fsCompartirProyecto;
 window.fsResolverInvitacionesPendientes = fsResolverInvitacionesPendientes;
 window.fsQuitarAcceso = fsQuitarAcceso;
+window.fsObtenerEditoresProyecto = fsObtenerEditoresProyecto;
 window.fsListarProyectosCompartidosConmigo = fsListarProyectosCompartidosConmigo;
 window.fsListarMisProyectosCompartidos = fsListarMisProyectosCompartidos;
 window.fsBorrarProyectoDeNube = fsBorrarProyectoDeNube;
@@ -416,6 +457,7 @@ window.fsInvitarAEspacio = fsInvitarAEspacio;
 window.fsAceptarInvitacionesEspacio = fsAceptarInvitacionesEspacio;
 window.fsListarMiembrosEspacio = fsListarMiembrosEspacio;
 window.fsListarInvitacionesPendientes = fsListarInvitacionesPendientes;
+window.fsEscucharInvitaciones = fsEscucharInvitaciones;
 window.fsMoverProyectoDeEspacio = fsMoverProyectoDeEspacio;
 window.fsRenombrarEspacio = fsRenombrarEspacio;
 window.fsBorrarEspacio = fsBorrarEspacio;

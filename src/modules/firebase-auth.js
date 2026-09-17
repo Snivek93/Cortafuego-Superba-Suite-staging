@@ -331,7 +331,37 @@ function resolverConUsuario(user) {
     // de proyectos la espera, y con tope de tiempo.
     _promesaInvitaciones = resolverInvitacionesSiHaceFalta(user);
     _resolverEsperaAuth(user);
+    escucharInvitacionesEnVivo(user);
   }
+}
+
+// Escucha en vivo las invitaciones de este correo MIENTRAS la app ya está
+// abierta — el resolver de arriba solo corre una vez, al iniciar sesión, así
+// que una invitación creada por otra persona DESPUÉS de eso (con esta app ya
+// abierta) no se notaba hasta recargar. onSnapshot dispara una primera vez
+// con el estado YA conocido (eso lo cubre resolverInvitacionesSiHaceFalta de
+// arriba) — se ignora ese primer disparo de cada colección para no resolver
+// dos veces lo mismo en paralelo, y se actúa solo en los disparos
+// siguientes, que son invitaciones genuinamente nuevas. Kevin, 08/09/2026:
+// "si yo invito a alguien a un proyecto esta persona no se da cuenta hasta
+// que recargue".
+let _primeraVezInvProyecto = true;
+let _primeraVezInvEspacio = true;
+function escucharInvitacionesEnVivo(user) {
+  if (!user.email) return;
+  const intentar = () => {
+    if (!window.fsEscucharInvitaciones) { setTimeout(intentar, 200); return; }
+    window.fsEscucharInvitaciones(user.email, (tipo, pendientes) => {
+      if (tipo === "proyecto") {
+        if (_primeraVezInvProyecto) { _primeraVezInvProyecto = false; return; }
+        if (pendientes.length > 0) resolverInvitacionesSiHaceFalta(user);
+      } else if (tipo === "espacio") {
+        if (_primeraVezInvEspacio) { _primeraVezInvEspacio = false; return; }
+        if (window.actualizarInvitacionesEspacioEnVivo) window.actualizarInvitacionesEspacioEnVivo(pendientes);
+      }
+    });
+  };
+  intentar();
 }
 
 // Promesa de "ya terminé de resolver invitaciones pendientes". Nunca

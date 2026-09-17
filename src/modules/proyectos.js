@@ -17,6 +17,7 @@ let CARPETA_ACTIVA_ID = null;
 let ESPACIOS = [];
 let ESPACIO_ACTIVO_ID = null;
 let INVITACIONES_ESPACIO = [];
+let ULTIMO_PERMITIR_CERRAR = false; // recordado para poder re-renderizar en vivo sin perder este dato (ver actualizarInvitacionesEspacioEnVivo)
 // Cache local (IndexedDB) de "a qué espacio pertenece cada proyecto" —
 // permite que el filtrado por espacio activo funcione incluso sin
 // conexión, usando el último dato confirmado. Ver cargarEstadoOrganizacion().
@@ -122,7 +123,7 @@ function ordenarCarpetas(lista, modo) {
   return copia;
 }
 
-function tarjetaProyectoHTML(id, data, esBorrador, modoManual, esCompartido, candadoAjeno, esDueno, soloLectura) {
+function tarjetaProyectoHTML(id, data, esBorrador, modoManual, esCompartido, candadoAjeno, esDueno, soloLectura, tieneEspacio) {
   const nombre = esBorrador
     ? (formatearFechaCorta(data.creadoEn || data.guardadoEn) || "Borrador")
     : ((data.projectInfo && data.projectInfo.nombre) || "Sin nombre");
@@ -145,7 +146,8 @@ function tarjetaProyectoHTML(id, data, esBorrador, modoManual, esCompartido, can
       </div>
       <div class="proy-card-right">
         ${!esBorrador ? `<button type="button" class="proy-card-mover" data-id="${escapeHtml(id)}" title="Mover a carpeta" aria-label="Mover a carpeta"><svg class="icon"><use href="#i-folder"/></svg></button>` : ""}
-        ${(!esBorrador && esDueno) ? `<button type="button" class="proy-card-mover-espacio" data-id="${escapeHtml(id)}" ${candadoAjeno ? "disabled" : ""} title="${candadoAjeno ? "Bloqueado: alguien lo está editando" : "Mover de espacio"}" aria-label="Mover de espacio"><svg class="icon"><use href="#i-share"/></svg></button>` : ""}
+        ${(!esBorrador && esDueno && tieneEspacio) ? `<button type="button" class="proy-card-permisos" data-id="${escapeHtml(id)}" data-nombre="${escapeHtml(nombre)}" data-espacio="${escapeHtml(tieneEspacio)}" title="Permisos de edición" aria-label="Permisos de edición"><svg class="icon"><use href="#i-share"/></svg></button>` : ""}
+        ${(!esBorrador && esDueno) ? `<button type="button" class="proy-card-mover-espacio" data-id="${escapeHtml(id)}" ${candadoAjeno ? "disabled" : ""} title="${candadoAjeno ? "Bloqueado: alguien lo está editando" : "Mover de espacio"}" aria-label="Mover de espacio"><svg class="icon"><use href="#i-move"/></svg></button>` : ""}
         <button type="button" class="proy-card-borrar" data-id="${escapeHtml(id)}" data-propio="${esCompartido ? "0" : "1"}" title="Borrar proyecto" aria-label="Borrar proyecto">
           <svg class="icon"><use href="#i-trash"/></svg>
         </button>
@@ -497,6 +499,81 @@ function abrirModalMiembrosEspacio(espacioId, nombreEspacio) {
   });
 }
 
+// Permite al DUEÑO de un proyecto (dentro de un espacio compartido) dar o
+// quitar acceso de EDICIÓN a otros miembros del mismo espacio, uno por uno
+// — antes esta infraestructura (fsCompartirProyecto/fsQuitarAcceso) existía
+// del todo pero sin ningún botón que la usara desde que Espacios de Trabajo
+// reemplazó el "compartir individual" de antes. Kevin, 08/09/2026: "no
+// tengo una opción para... darle permiso a [x] a poder editar en alguno".
+// Se elige de la lista de miembros del espacio (ya sabemos quién está ahí,
+// vía fsListarMiembrosEspacio) — no hace falta escribir el correo a mano.
+function abrirModalPermisosProyecto(proyectoId, nombreProyecto, espacioId) {
+  if (!window.fsListarMiembrosEspacio || !window.fsCompartirProyecto || !window.fsQuitarAcceso || !window.fsObtenerEditoresProyecto) {
+    if (window.mostrarToast) mostrarToast("Permisos de edición todavía no está disponible en esta versión.", "error");
+    return;
+  }
+  const user = window.usuarioActual ? window.usuarioActual() : null;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <p style="font-weight:600;margin:0 0 4px;">Permisos de edición</p>
+      <p style="font-size:var(--fs-sm);color:var(--text-muted);margin:0 0 12px;">${escapeHtml(nombreProyecto || "este proyecto")}</p>
+      <div id="proy-permisos-lista"><p style="font-size:var(--fs-sm);color:var(--text-muted);">Cargando…</p></div>
+      <div class="modal-actions">
+        <button class="secondary" data-act="cancel">Cerrar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.dataset.act === "cancel") { overlay.remove(); return; }
+    const chk = e.target.closest("[data-permiso-uid]");
+    if (!chk) return;
+    const uid = chk.getAttribute("data-permiso-uid");
+    const email = chk.getAttribute("data-permiso-email");
+    const nombreMiembro = chk.getAttribute("data-permiso-nombre") || email;
+    if (chk.checked) {
+      chk.disabled = true;
+      window.fsCompartirProyecto(proyectoId, nombreProyecto, email, "editor", user && user.email)
+        .then(() => { if (window.mostrarToast) mostrarToast(`Invitación enviada — se activa apenas ${nombreMiembro} entre a la app.`); })
+        .catch((err) => { chk.checked = false; if (window.mostrarToast) mostrarToast("No se pudo invitar: " + (err && err.message ? err.message : "probá de nuevo."), "error"); })
+        .finally(() => { chk.disabled = false; });
+    } else {
+      chk.disabled = true;
+      window.fsQuitarAcceso(proyectoId, uid)
+        .then(() => { if (window.mostrarToast) mostrarToast(`Acceso de edición quitado a ${nombreMiembro}.`); })
+        .catch((err) => { chk.checked = true; if (window.mostrarToast) mostrarToast("No se pudo quitar el acceso: " + (err && err.message ? err.message : "probá de nuevo."), "error"); })
+        .finally(() => { chk.disabled = false; });
+    }
+  });
+  Promise.all([
+    window.fsListarMiembrosEspacio(espacioId),
+    window.fsObtenerEditoresProyecto(proyectoId),
+  ]).then(([miembros, editoresUids]) => {
+    const cont = document.getElementById("proy-permisos-lista");
+    if (!cont) return; // el modal ya se cerró antes de que llegara la respuesta
+    const otros = miembros.filter((m) => !user || m.uid !== user.uid);
+    if (!otros.length) {
+      cont.innerHTML = `<p style="font-size:var(--fs-sm);color:var(--text-muted);">No hay más miembros en este espacio todavía.</p>`;
+      return;
+    }
+    cont.innerHTML = otros.map((m) => `
+      <div class="invitacion-espacio-fila">
+        <div>
+          <p class="invitacion-espacio-nombre">${escapeHtml(m.nombre || m.email || "Sin nombre")}</p>
+          ${m.nombre && m.email ? `<p class="invitacion-espacio-sub">${escapeHtml(m.email)}</p>` : ""}
+        </div>
+        <label class="acr-checkbox-label" style="margin:0;white-space:nowrap">
+          <input type="checkbox" data-permiso-uid="${escapeHtml(m.uid)}" data-permiso-email="${escapeHtml(m.email)}" data-permiso-nombre="${escapeHtml(m.nombre || m.email)}" ${editoresUids.includes(m.uid) ? "checked" : ""}>
+          Puede editar
+        </label>
+      </div>`).join("");
+  }).catch((e) => {
+    const cont = document.getElementById("proy-permisos-lista");
+    if (cont) cont.innerHTML = `<p class="auth-error">No se pudo cargar: ${escapeHtml(e && e.message ? e.message : "revisá tu conexión.")}</p>`;
+  });
+}
+
 function abrirModalMoverDeEspacio(proyectoId) {
   if (!window.fsMoverProyectoDeEspacio) {
     if (window.mostrarToast) mostrarToast("Mover de espacio todavía no está disponible en esta versión.", "error");
@@ -787,6 +864,23 @@ function crearOverlaySiHaceFalta() {
   return el;
 }
 
+// Se llama desde el listener en vivo de invitaciones (ver
+// escucharInvitacionesEnVivo en firebase-auth.js) cuando llega una
+// invitación a un ESPACIO nueva mientras la app ya está abierta. Solo
+// actualiza el dato en memoria y, si la Pantalla de Proyectos está abierta
+// en este momento, la repinta (soloLocal=true, sin red) para que el badge
+// aparezca al toque — unirse al espacio sigue siendo una acción manual
+// ("Unirme a todas"), esto solo hace que la persona SEPA que ya está
+// esperando, sin tener que recargar. Kevin, 08/09/2026.
+function actualizarInvitacionesEspacioEnVivo(pendientes) {
+  INVITACIONES_ESPACIO = pendientes || [];
+  const overlay = document.getElementById("pantalla-proyectos");
+  if (overlay && !overlay.hidden) {
+    renderPantallaProyectos(ULTIMO_PERMITIR_CERRAR, true);
+  }
+}
+window.actualizarInvitacionesEspacioEnVivo = actualizarInvitacionesEspacioEnVivo;
+
 // Actualiza SOLO lo que se ve en la tarjeta de la lista (nombre, cliente,
 // fecha) usando los campos livianos que las 3 consultas de listado YA
 // traen — nunca descarga el contenido completo (fotos incluidas) solo
@@ -815,10 +909,22 @@ function actualizarMetadataListadoSiHaceFalta(doc, lista) {
   }
   const idx = lista.findIndex((p) => p.id === id);
   if (idx === -1) {
+    // doc.nombre puede venir vacío en un proyecto REAL (tieneContenido:
+    // true) si es de antes de que fsSubirCambios empezara a mantener el
+    // nombre actualizado en el documento liviano, y esta es la PRIMERA
+    // vez que este dispositivo lo ve (sin nombre cacheado localmente al
+    // cual recurrir como respaldo). Sin este placeholder, un proyecto así
+    // se clasifica como "borrador" — y los borradores se ESCONDEN por
+    // completo dentro de un espacio compartido, así que el proyecto
+    // desaparecía en cualquier dispositivo que nunca lo hubiera abierto
+    // antes, aunque existiera perfectamente en Firestore. Kevin,
+    // 08/09/2026: "en la desktop no sale Tibas, en todos los demás sí" —
+    // esa desktop era la única que nunca lo había abierto localmente.
+    const nombreVitrina = doc.nombre || (doc.tieneContenido ? "(Sin nombre — abrir para corregir)" : "");
     lista.push({
       id,
       data: {
-        projectInfo: { nombre: doc.nombre || "", cliente: doc.cliente || "" },
+        projectInfo: { nombre: nombreVitrina, cliente: doc.cliente || "" },
         guardadoEn: guardadoEnISO,
         creadoEn: guardadoEnISO,
         _sinDescargar: true,
@@ -842,6 +948,7 @@ function actualizarMetadataListadoSiHaceFalta(doc, lista) {
 }
 
 async function renderPantallaProyectos(permitirCerrar, soloLocal) {
+  ULTIMO_PERMITIR_CERRAR = permitirCerrar;
   const overlay = crearOverlaySiHaceFalta();
   await cargarEstadoOrganizacion(soloLocal);
 
@@ -984,7 +1091,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
        ${controlOrden}
        <div class="proy-lista" id="proy-lista-principal">
          ${carpetasOrdenadas.map(c => tarjetaCarpetaHTML(c, conNombre.filter(p => CARPETA_ASIGNACIONES[p.id] === c.id).length)).join("")}
-         ${proyectosOrdenados.map(p => tarjetaProyectoHTML(p.id, p.data, false, modoManual, idsCompartidos.has(p.id), candadosAjenosPorProyecto[p.id], !idsCompartidos.has(p.id), permisoEdicionConocido[p.id] === false)).join("")}
+         ${proyectosOrdenados.map(p => tarjetaProyectoHTML(p.id, p.data, false, modoManual, idsCompartidos.has(p.id), candadosAjenosPorProyecto[p.id], !idsCompartidos.has(p.id), permisoEdicionConocido[p.id] === false, espacioIdConocido[p.id] || "")).join("")}
        </div>`
     : "";
   const btnNuevaCarpeta = puedeCrearSubcarpeta
@@ -1120,6 +1227,13 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       abrirModalMoverACarpeta(btn.getAttribute("data-id"));
+    });
+  });
+
+  overlay.querySelectorAll(".proy-card-permisos").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      abrirModalPermisosProyecto(btn.getAttribute("data-id"), btn.getAttribute("data-nombre"), btn.getAttribute("data-espacio"));
     });
   });
 
