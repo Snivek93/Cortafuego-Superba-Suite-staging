@@ -191,6 +191,36 @@ function obtenerCertificadosAplicables(computedRows, computedJRows) {
   return encontrados;
 }
 
+// Orden fijo pedido por Kevin (10/09/2026) para los documentos de producto
+// del Submittal — antes salían en orden alfabético (así quedaba armado por
+// calc-engine.js para otros usos, como la tabla de Resumen), que no es el
+// orden en que Kevin quiere presentarlos a un cliente. Se reordena SOLO
+// acá, en el Submittal — no se toca el orden alfabético que ya usan otras
+// pantallas/reportes con esta misma lista.
+// Ojo con "Cinta CP648-E" vs "Collar de retención CP648-ER": comparten
+// "648", así que el regex de cinta exige la palabra "cinta" antes, y el de
+// collar exige "collar" — no se cruzan entre sí.
+const ORDEN_PRIORIDAD_FICHAS_SUBMITTAL = [
+  /fs\s*one\s*max/i,                 // 1. FS ONE MAX
+  /lana\s*mineral/i,                 // 2. Lana Mineral
+  /cinta.*648/i,                     // 3. Cinta Intumescente CP 648-E
+  /collar.*648/i,                    // 4. Collar Metálico CP 648-ER
+  /almohadilla|cfs-?bl/i,            // 5. Ladrillo/Almohadilla CFS-BL
+  /manga.*653/i,                     // 6. Manga CP 653 4"
+  /cfs-?msl|paso\s*de\s*cables/i,    // 7. CFS MSL
+];
+function ordenarFichasParaSubmittal(fichas) {
+  const indicePrioridad = (nombre) => {
+    const idx = ORDEN_PRIORIDAD_FICHAS_SUBMITTAL.findIndex(re => re.test(nombre || ""));
+    return idx === -1 ? ORDEN_PRIORIDAD_FICHAS_SUBMITTAL.length : idx;
+  };
+  return fichas.slice().sort((a, b) => {
+    const pa = indicePrioridad(a.nombre), pb = indicePrioridad(b.nombre);
+    if (pa !== pb) return pa - pb;
+    return (a.nombre || "").localeCompare(b.nombre || ""); // empate: alfabético, como ya era
+  });
+}
+
 function categorizarNormativas(normas) {
   const juntas = normas.filter(n => /^junta/i.test(n.aplicacion || ""));
   const resto = normas.filter(n => !/^junta/i.test(n.aplicacion || ""));
@@ -407,7 +437,7 @@ async function descargarSubmittalInterno() {
   });
   mezclarResumenJuntas(resumen, computedJ);
 
-  const fichas = resumen.fichasTecnicas.filter(f => f.link);
+  const fichas = ordenarFichasParaSubmittal(resumen.fichasTecnicas.filter(f => f.link));
   const normasTodas = resumen.normativas.filter(n => n.link);
   const { paredLiviana: normasParedLiviana, concreto: normasConcreto, juntas: normasJuntas } = categorizarNormativas(normasTodas);
   const certificados = obtenerCertificadosAplicables(computed, computedJ);
