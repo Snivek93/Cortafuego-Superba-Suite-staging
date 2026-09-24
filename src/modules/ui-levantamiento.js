@@ -964,6 +964,92 @@ function agruparPorZona() {
   return grupos;
 }
 
+// ============================================================================
+// Renombrar/multiplicar una zona en bloque — antes, corregir un nombre de
+// zona escrito mal a propósito significaba entrar fila por fila a
+// corregirlo, y repetir un nivel completo para un edificio con niveles
+// iguales significaba cargar todo de nuevo desde cero. Kevin, 10/09/2026.
+// ============================================================================
+function filasDelGrupo(zonaRaw, nivel) {
+  return ROWS.filter(r => (r.A || "(sin zona)") === zonaRaw && (r.B || "") === nivel);
+}
+function abrirModalRenombrarZona(zonaRaw, nivel) {
+  const filas = filasDelGrupo(zonaRaw, nivel);
+  const zonaActual = zonaRaw === "(sin zona)" ? "" : zonaRaw;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <p style="font-weight:600;margin:0 0 12px;">Renombrar zona / nivel</p>
+      <p class="hint" style="margin:0 0 12px;">Se actualizan las ${filas.length} fila(s) de este grupo.</p>
+      <label class="lev-field-label">Zona
+        <input type="text" id="lev-renombrar-zona" value="${escapeHtml(zonaActual)}" placeholder="Ej. Cuarto eléctrico">
+      </label>
+      <label class="lev-field-label">Nivel
+        <input type="text" id="lev-renombrar-nivel" value="${escapeHtml(nivel)}" placeholder="Opcional" style="margin-top:8px;">
+      </label>
+      <div class="modal-actions">
+        <button class="secondary" data-act="cancel">Cancelar</button>
+        <button class="primary" data-act="guardar">Guardar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.dataset.act === "cancel") { overlay.remove(); return; }
+    if (e.target.dataset.act === "guardar") {
+      const nuevaZona = document.getElementById("lev-renombrar-zona").value.trim();
+      const nuevoNivel = document.getElementById("lev-renombrar-nivel").value.trim();
+      pushUndo();
+      filas.forEach(r => { r.A = nuevaZona; r.B = nuevoNivel; });
+      marcarCambio();
+      overlay.remove();
+      renderLevantamiento();
+      mostrarToast(`Zona actualizada en ${filas.length} fila(s).`);
+    }
+  });
+}
+function abrirModalMultiplicarZona(zonaRaw, nivel) {
+  const filas = filasDelGrupo(zonaRaw, nivel);
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <p style="font-weight:600;margin:0 0 12px;">Multiplicar zona / nivel</p>
+      <p class="hint" style="margin:0 0 12px;">Se crean copias completas de las ${filas.length} fila(s) de este grupo (mismo penetrante, producto y dimensiones — sin fotos, esas son evidencia real de cada visita). Cada copia queda separada de las demás, marcada temporalmente, para que le pongas el nombre real después.</p>
+      <label class="lev-field-label">¿Cuántos en total? (incluyendo este)
+        <input type="number" id="lev-multiplicar-total" min="2" max="50" value="2" inputmode="numeric">
+      </label>
+      <div class="modal-actions">
+        <button class="secondary" data-act="cancel">Cancelar</button>
+        <button class="primary" data-act="confirmar">Multiplicar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.dataset.act === "cancel") { overlay.remove(); return; }
+    if (e.target.dataset.act === "confirmar") {
+      const total = Math.max(2, Math.min(50, parseInt(document.getElementById("lev-multiplicar-total").value, 10) || 2));
+      pushUndo();
+      const copiasCreadas = total - 1;
+      for (let i = 2; i <= total; i++) {
+        const nivelCopia = nivel ? `${nivel} (copia ${i})` : `(copia ${i})`;
+        filas.forEach(original => {
+          const clon = Object.assign({}, original, {
+            _id: ROW_SEQ++,
+            B: nivelCopia,
+            fotos: [],
+          });
+          ROWS.push(clon);
+        });
+      }
+      marcarCambio();
+      overlay.remove();
+      renderLevantamiento();
+      mostrarToast(`Se crearon ${copiasCreadas} copia(s) — entrá a cada una a poner el nombre real del nivel.`);
+    }
+  });
+}
+
 function describirItemLevantamiento(r) {
   const dim = r.D !== "" ? " " + formatFraccionPulgadas(r.D) : "";
   const esRedondoLibre = levUsaDiametroLibre(r.L) && r.F !== "";
@@ -977,7 +1063,13 @@ function renderListaAgrupadaHTML(grupos) {
   if (grupos.length === 0) return `<div class="hint" style="margin:0;">Todavía no agregaste nada.</div>`;
   return grupos.map(g => `
     <div class="lev-zona-group">
-      <div class="lev-zona-title">${escapeHtml(g.zona)} <span class="lev-hint-sticky">(${g.items.length})</span></div>
+      <div class="lev-zona-title">
+        <span>${escapeHtml(g.zona)} <span class="lev-hint-sticky">(${g.items.length})</span></span>
+        <span class="lev-zona-title-acciones">
+          <button type="button" class="lev-zona-accion-btn" data-lev-zona-renombrar="1" data-zona-raw="${escapeHtml(g.zonaRaw)}" data-nivel="${escapeHtml(g.nivel)}" title="Renombrar esta zona/nivel (afecta las ${g.items.length} filas)" aria-label="Renombrar zona"><svg class="icon"><use href="#i-edit"/></svg></button>
+          <button type="button" class="lev-zona-accion-btn" data-lev-zona-multiplicar="1" data-zona-raw="${escapeHtml(g.zonaRaw)}" data-nivel="${escapeHtml(g.nivel)}" title="Multiplicar esta zona/nivel (duplica las ${g.items.length} filas)" aria-label="Multiplicar zona"><svg class="icon"><use href="#i-copy"/></svg></button>
+        </span>
+      </div>
       <div class="lev-recent-list">
         ${g.items.map(r => `
         <div class="lev-recent-item">
@@ -1386,6 +1478,17 @@ function attachLevantamientoEvents() {
     btn.addEventListener("click", () => {
       const id = Number(btn.dataset.levEditBtn);
       editarItemLevantamiento(id);
+    });
+  });
+
+  cont.querySelectorAll("[data-lev-zona-renombrar]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      abrirModalRenombrarZona(btn.getAttribute("data-zona-raw"), btn.getAttribute("data-nivel"));
+    });
+  });
+  cont.querySelectorAll("[data-lev-zona-multiplicar]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      abrirModalMultiplicarZona(btn.getAttribute("data-zona-raw"), btn.getAttribute("data-nivel"));
     });
   });
 }

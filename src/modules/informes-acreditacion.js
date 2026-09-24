@@ -174,7 +174,10 @@ function nombreElemento(el) {
 }
 function descripcionElemento(el) {
   if (el.categoria === "penetrante") {
-    return ubicacionLabel(el.material);
+    let desc = ubicacionLabel(el.material);
+    if (el.diametroPulg) desc += ` · ${fraccion(el.diametroPulg)}`;
+    if (el.numVueltasCinta) desc += ` · ${el.numVueltasCinta} vuelta${el.numVueltasCinta === 1 ? "" : "s"} de cinta`;
+    return desc;
   }
   const pos = el.juntaPosicion ? `${el.juntaPosicion} — ` : "";
   return `${pos}${el.juntaBarreras}`;
@@ -847,7 +850,7 @@ function renderModalElemento() {
       ${f.tipo ? `
       <div class="acr-modal-seccion">
         <div class="acr-modal-seccion-titulo">Ubicación</div>
-        <div class="lev-chip-grid lev-chip-grid-compact">
+        <div class="lev-chip-grid lev-chip-grid-ubicacion">
           ${COMBOS_UBICACION_MATERIAL.map((c) => acrChipCombo(["ubicacion", "material"], [c.ubicacion, c.material], c.label, f.ubicacion === c.ubicacion && f.material === c.material)).join("")}
         </div>
       </div>
@@ -874,7 +877,18 @@ function renderModalElemento() {
         <div class="acr-modal-seccion">
           <div class="acr-modal-seccion-titulo">Producto instalado</div>
           ${opciones.map((o) => `<button type="button" class="acr-producto-opcion ${f.producto === o.producto ? "active" : ""}" data-acr-elform-chip="producto" data-valor="${escapeHtml(o.producto)}"><strong>${escapeHtml(o.producto)}</strong><span class="hint">Sistema ${escapeHtml(o.sistemaUL)} — mín. ${fraccion(o.espesor)}</span></button>`).join("")}
-        </div>` : `<p class="hint">No hay un sistema UL registrado para esa combinación — probá otra ubicación o espacio anular.</p>`) : ""}`;
+        </div>
+        ${(() => {
+          // Antes las vueltas de cinta se calculaban bien pero solo se veían
+          // hasta el informe final generado — acá, al momento de cargar el
+          // elemento, no había forma de confirmar que el número fuera el
+          // correcto antes de guardar. Kevin, 08/09/2026: "no dice el número
+          // de vueltas de cinta".
+          if (!f.producto || !PRODUCTOS_CON_CINTA.has(f.producto) || !diametroPulgNum || isNaN(diametroPulgNum) || !window.vueltasCintaPenetrante) return "";
+          const nv = window.vueltasCintaPenetrante({ L: f.tipo, M: f.ubicacion, N: f.material, P: f.producto, D: diametroPulgNum, E: 0 });
+          if (typeof nv !== "number") return "";
+          return `<p class="acr-vueltas-preview"><strong>${nv} vuelta${nv === 1 ? "" : "s"}</strong> de cinta intumescente para ${fraccion(diametroPulgNum)}.</p>`;
+        })()}` : `<p class="hint">No hay un sistema UL registrado para esa combinación — probá otra ubicación o espacio anular.</p>`) : ""}`;
   } else {
     const tipos = (window.todosLosTipos ? window.todosLosTipos() : []).map((x) => x.tipo);
     const junta = f.tipo && window.juntaParaTipo ? window.juntaParaTipo(f.tipo) : null;
@@ -2051,8 +2065,19 @@ function confirmarNuevoElemento() {
     // Vueltas de cinta reales, usando la misma tabla oficial que el motor de
     // cálculo de Levantamiento (vueltasCintaPenetrante) — solo aplica para
     // productos de cinta intumescente en tuberías combustibles.
+    // OJO: vueltasCintaPenetrante espera M=ubicación (Entrepiso/Pared) y
+    // N=material (Concreto/Panel de Yeso) — misma convención que usa
+    // opcionesProductoPenetrante() y precargarElementosDesdeLevantamiento()
+    // en este mismo archivo (ubicacion: r.M, material: r.N). Este row los
+    // tenía INVERTIDOS desde siempre: con M=material y N=ubicacion, ninguna
+    // de las dos comparaciones internas de la tabla (M==="Entrepiso",
+    // N==="Panel de Yeso") podía dar cierto nunca, así que SIEMPRE caía a
+    // la tabla de pared de concreto — Panel de Yeso y Entrepiso/Losa
+    // calculaban mal el número de vueltas sin que nada lo mostrara para
+    // notarlo. Kevin, 08/09/2026: encontrado al agregar el aviso visible
+    // de vueltas que pidió.
     if (tieneDiametro && elementoUsaCinta(nuevoElemento) && window.vueltasCintaPenetrante) {
-      const row = { L: f.tipo, M: f.material, N: f.ubicacion, P: f.producto, D: diametroPulgNum, E: 0 };
+      const row = { L: f.tipo, M: f.ubicacion, N: f.material, P: f.producto, D: diametroPulgNum, E: 0 };
       const nv = window.vueltasCintaPenetrante(row);
       if (typeof nv === "number") nuevoElemento.numVueltasCinta = nv;
     }
