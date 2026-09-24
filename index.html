@@ -456,17 +456,21 @@
       <div class="section-head">
         <h2>Cuantificación de Materiales Hilti</h2>
         <div class="section-head-actions">
+          <button class="secondary" id="btn-separar-zonas" title="Separar la cuantificación en grupos de zonas"><svg class="icon"><use href="#i-list"/></svg><span class="btn-label">Separar por zonas</span></button>
           <button class="secondary" id="btn-compartir-tabla-materiales" title="Compartir imagen de la tabla"><svg class="icon"><use href="#i-share"/></svg><span class="btn-label">Compartir imagen</span></button>
           <button class="secondary" id="btn-agregar-manual"><svg class="icon"><use href="#i-plus"/></svg>Agregar producto</button>
         </div>
       </div>
       <div id="modo-productos-bar" class="modo-productos-bar"></div>
-      <div class="table-scroll">
-        <table class="resumen-table" id="tabla-materiales">
-          <thead><tr><th>Código</th><th class="num">Cantidad</th><th>Producto</th><th>Presentación</th><th>Tipo</th><th></th></tr></thead>
-          <tbody id="tbody-materiales"></tbody>
-        </table>
+      <div id="materiales-vista-combinada">
+        <div class="table-scroll">
+          <table class="resumen-table" id="tabla-materiales">
+            <thead><tr><th>Código</th><th class="num">Cantidad</th><th>Producto</th><th>Presentación</th><th>Tipo</th><th></th></tr></thead>
+            <tbody id="tbody-materiales"></tbody>
+          </table>
+        </div>
       </div>
+      <div id="materiales-vista-agrupada" style="display:none;"></div>
       <p class="hint">Cantidades redondeadas hacia arriba por presentación de venta, incluyendo el % de desperdicio configurado. Para pasta FS ONE MAX y selladores CP 606 / CFS SIL GG se calcula automáticamente la combinación de cubetas + cartuchos sueltos más conveniente.</p>
     </div>
 
