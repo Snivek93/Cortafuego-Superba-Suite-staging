@@ -442,6 +442,14 @@ body.levantamiento-saliendo #levantamiento-fullscreen { opacity: 0; transform: t
 .lev-unidad-btn-active { background: var(--grey-1, #eee); color: var(--ink); }
 .lev-sublabel { display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; text-transform: none; letter-spacing: normal; }
 .lev-chip-grid-compact { grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 6px; }
+/* Etiquetas de ubicación en Acreditación ("Pared de Panel de Yeso", etc.) —
+   con el ancho mínimo de la grilla compacta (56px, pensado para textos
+   cortos como '8"') el navegador partía las palabras a la mitad para que
+   entraran. Ancho mínimo mayor + word-break:normal asegura que las palabras
+   se envuelvan completas en 2-3 líneas, nunca cortadas. Kevin, 08/09/2026.*/
+.lev-chip-grid-ubicacion { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px; }
+.lev-chip-grid-ubicacion .lev-chip { word-break: normal; hyphens: none; }
+.acr-vueltas-preview { margin: 8px 0 0; padding: 8px 10px; background: var(--surface-raised, var(--grey-1)); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: var(--fs-sm); }
 .lev-chip-compact { padding: 8px 4px; font-size: 13px; }
 .lev-chip-input { font-family: inherit; }
 .lev-chip-input::placeholder { color: var(--text-muted); }
@@ -497,7 +505,11 @@ body.levantamiento-saliendo #levantamiento-fullscreen { opacity: 0; transform: t
 }
 .lev-zona-group { margin-bottom: 14px; }
 .lev-tab-subtitle { margin: 0 0 10px; font-size: var(--fs-lg); color: var(--text); }
-.lev-zona-title { font-size: var(--fs-base); font-weight: 700; color: var(--ink); margin-bottom: 6px; }
+.lev-zona-title { font-size: var(--fs-base); font-weight: 700; color: var(--ink); margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lev-zona-title-acciones { display: flex; gap: 2px; flex-shrink: 0; }
+.lev-zona-accion-btn { background: transparent; border: none; padding: 5px; border-radius: var(--radius-sm); color: var(--text-muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+@media (hover: hover) and (pointer: fine) { .lev-zona-accion-btn:hover { background: var(--grey-1); color: var(--ink); } }
+.lev-zona-accion-btn .icon { width: 16px; height: 16px; }
 .lev-recent-list { display: flex; flex-direction: column; gap: 6px; }
 .lev-recent-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; font-size: var(--fs-sm); }
 .lev-recent-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
