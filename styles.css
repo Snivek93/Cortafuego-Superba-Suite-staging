@@ -392,7 +392,16 @@ table.instr-table td:first-child, table.instr-table th:first-child { width: 32px
    tapa todo (z-index 2000, sigue ahí encima) — para cuando el overlay
    termina de desvanecerse, la calculadora ya está lista y aparece al
    instante, sin el frame negro. */
-body.modo-levantamiento:not(.levantamiento-saliendo) > *:not(#levantamiento-fullscreen):not(#planos-visor-overlay) { display: none !important; }
+/* .modal-overlay excluido a propósito (10/09/2026): CUALQUIER modal
+   genérico agregado como hijo directo de <body> mientras se está dentro
+   de Levantamiento fullscreen quedaba oculto por esta regla sin que nada
+   lo avisara — ni error de consola, ni nada visible, el modal existía en
+   el DOM pero nunca se veía. Encontrado recién al probar visualmente con
+   Playwright el modal de "Nota de zona" (los de renombrar/multiplicar
+   zona de la misma sesión probablemente tenían el mismo problema, sin
+   detectar porque solo se había probado su lógica interna, no su
+   visibilidad real en pantalla). */
+body.modo-levantamiento:not(.levantamiento-saliendo) > *:not(#levantamiento-fullscreen):not(#planos-visor-overlay):not(.modal-overlay) { display: none !important; }
 body.modo-levantamiento #levantamiento-fullscreen { display: block; position: fixed; inset: 0; z-index: 2000; background: var(--grey-1); overflow-y: auto; transition: opacity .2s cubic-bezier(0.22,0.61,0.36,1), transform .2s cubic-bezier(0.22,0.61,0.36,1); animation: overlayEntrar .2s cubic-bezier(0.22,0.61,0.36,1); }
 body.levantamiento-saliendo #levantamiento-fullscreen { opacity: 0; transform: translateY(6px) scale(0.99); }
 .lev-fullscreen-topbar { position: sticky; top: 0; z-index: 10; background: var(--bar-bg); color: white; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 3px solid var(--hilti-red); }
@@ -510,6 +519,10 @@ body.levantamiento-saliendo #levantamiento-fullscreen { opacity: 0; transform: t
 .lev-zona-accion-btn { background: transparent; border: none; padding: 5px; border-radius: var(--radius-sm); color: var(--text-muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 @media (hover: hover) and (pointer: fine) { .lev-zona-accion-btn:hover { background: var(--grey-1); color: var(--ink); } }
 .lev-zona-accion-btn .icon { width: 16px; height: 16px; }
+.lev-zona-accion-btn-activo { color: var(--hilti-red); }
+.lev-zona-nota-texto { font-size: var(--fs-xs); color: var(--text-secondary); font-style: italic; margin: -2px 0 6px; }
+.lev-sticky-nota-btn { flex-shrink: 0; align-self: flex-end; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; color: var(--text-muted); cursor: pointer; display: inline-flex; margin-bottom: 1px; }
+@media (hover: hover) and (pointer: fine) { .lev-sticky-nota-btn:hover { color: var(--ink); background: var(--grey-1); } }
 .lev-recent-list { display: flex; flex-direction: column; gap: 6px; }
 .lev-recent-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; font-size: var(--fs-sm); }
 .lev-recent-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
