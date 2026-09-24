@@ -5,6 +5,12 @@
 // archivo-estado-app.js le hace reasignación directa -- ver nota igual en
 // ui-tabla-calculadora.js sobre por qué esto es necesario.
 var VISTA_LEVANTAMIENTO_TAB = "detallado";
+// Notas de zona — un comentario de campo asociado a una zona/nivel entera
+// (no a una fila puntual, que ya tiene su propio campo Nota). Se guarda
+// CON el proyecto (mismo patrón que GRUPOS_CUANTIFICACION/PLANOS). Kevin,
+// 10/09/2026: "poder colocar una nota a una zona... Cuarto Eléctrico Nivel
+// 1... Tiene estructura de cielo instalada".
+var NOTAS_ZONA = {};
 
 (function () {
 const DIAMETROS_COMUNES = [
@@ -380,6 +386,7 @@ function renderLevantamientoJuntas(cont) {
           <label>Nivel</label>
           <input type="text" id="levj-nivel" placeholder="Opcional" value="${escapeHtml(LEV_J.nivel)}">
         </div>
+        <button type="button" id="levj-btn-nota-zona-activa" class="lev-sticky-nota-btn ${NOTAS_ZONA[claveNotaZona(LEV_J.zona, LEV_J.nivel)] ? "lev-zona-accion-btn-activo" : ""}" title="${NOTAS_ZONA[claveNotaZona(LEV_J.zona, LEV_J.nivel)] ? "Editar nota de esta zona" : "Agregar nota a esta zona"}" aria-label="Nota de zona"><svg class="icon"><use href="#i-clipboard"/></svg></button>
       </div>
 
       ${editando ? `<div class="lev-editing-banner"><svg class="icon"><use href="#i-edit"/></svg>Editando un elemento de la lista — al tocar "Guardar cambios" se actualiza. <button type="button" id="levj-btn-cancelar">Cancelar</button></div>` : ""}
@@ -747,6 +754,8 @@ function attachLevantamientoJuntasEvents(cont) {
   if (zonaEl) zonaEl.addEventListener("input", () => { LEV_J.zona = zonaEl.value; });
   const nivelEl = cont.querySelector("#levj-nivel");
   if (nivelEl) nivelEl.addEventListener("input", () => { LEV_J.nivel = nivelEl.value; });
+  const btnNotaZonaActivaJ = cont.querySelector("#levj-btn-nota-zona-activa");
+  if (btnNotaZonaActivaJ) btnNotaZonaActivaJ.addEventListener("click", () => abrirModalNotaZona(LEV_J.zona, LEV_J.nivel));
 
   const fotoInputJ = cont.querySelector("#levj-foto-input");
   if (fotoInputJ) fotoInputJ.addEventListener("change", async () => {
@@ -1050,6 +1059,36 @@ function abrirModalMultiplicarZona(zonaRaw, nivel) {
   });
 }
 
+function claveNotaZona(zonaRaw, nivel) { return (zonaRaw || "(sin zona)") + "‖" + (nivel || ""); }
+function abrirModalNotaZona(zonaRaw, nivel) {
+  const clave = claveNotaZona(zonaRaw, nivel);
+  const notaActual = NOTAS_ZONA[clave] || "";
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <p style="font-weight:600;margin:0 0 12px;">Nota de zona</p>
+      <p class="hint" style="margin:0 0 10px;">Se muestra junto al título de esta zona, en la app y en el PDF del informe.</p>
+      <textarea id="lev-nota-zona-input" class="lev-textarea" rows="3" placeholder="Ej. Tiene estructura de cielo instalada">${escapeHtml(notaActual)}</textarea>
+      <div class="modal-actions">
+        <button class="secondary" data-act="cancel">Cancelar</button>
+        <button class="primary" data-act="guardar">Guardar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.dataset.act === "cancel") { overlay.remove(); return; }
+    if (e.target.dataset.act === "guardar") {
+      const texto = document.getElementById("lev-nota-zona-input").value.trim();
+      if (texto) NOTAS_ZONA[clave] = texto; else delete NOTAS_ZONA[clave];
+      marcarCambio();
+      overlay.remove();
+      renderLevantamiento();
+      mostrarToast(texto ? "Nota de zona guardada." : "Nota de zona quitada.");
+    }
+  });
+}
+
 function describirItemLevantamiento(r) {
   const dim = r.D !== "" ? " " + formatFraccionPulgadas(r.D) : "";
   const esRedondoLibre = levUsaDiametroLibre(r.L) && r.F !== "";
@@ -1068,8 +1107,10 @@ function renderListaAgrupadaHTML(grupos) {
         <span class="lev-zona-title-acciones">
           <button type="button" class="lev-zona-accion-btn" data-lev-zona-renombrar="1" data-zona-raw="${escapeHtml(g.zonaRaw)}" data-nivel="${escapeHtml(g.nivel)}" title="Renombrar esta zona/nivel (afecta las ${g.items.length} filas)" aria-label="Renombrar zona"><svg class="icon"><use href="#i-edit"/></svg></button>
           <button type="button" class="lev-zona-accion-btn" data-lev-zona-multiplicar="1" data-zona-raw="${escapeHtml(g.zonaRaw)}" data-nivel="${escapeHtml(g.nivel)}" title="Multiplicar esta zona/nivel (duplica las ${g.items.length} filas)" aria-label="Multiplicar zona"><svg class="icon"><use href="#i-copy"/></svg></button>
+          <button type="button" class="lev-zona-accion-btn ${NOTAS_ZONA[claveNotaZona(g.zonaRaw, g.nivel)] ? "lev-zona-accion-btn-activo" : ""}" data-lev-zona-nota="1" data-zona-raw="${escapeHtml(g.zonaRaw)}" data-nivel="${escapeHtml(g.nivel)}" title="${NOTAS_ZONA[claveNotaZona(g.zonaRaw, g.nivel)] ? "Editar nota de zona" : "Agregar nota de zona"}" aria-label="Nota de zona"><svg class="icon"><use href="#i-clipboard"/></svg></button>
         </span>
       </div>
+      ${NOTAS_ZONA[claveNotaZona(g.zonaRaw, g.nivel)] ? `<p class="lev-zona-nota-texto">${escapeHtml(NOTAS_ZONA[claveNotaZona(g.zonaRaw, g.nivel)])}</p>` : ""}
       <div class="lev-recent-list">
         ${g.items.map(r => `
         <div class="lev-recent-item">
@@ -1110,8 +1151,8 @@ function renderLevantamiento() {
           <label>Nivel</label>
           <input type="text" id="lev-nivel" placeholder="Opcional" value="${escapeHtml(LEV.nivel)}">
         </div>
+        <button type="button" id="lev-btn-nota-zona-activa" class="lev-sticky-nota-btn ${NOTAS_ZONA[claveNotaZona(LEV.zona, LEV.nivel)] ? "lev-zona-accion-btn-activo" : ""}" title="${NOTAS_ZONA[claveNotaZona(LEV.zona, LEV.nivel)] ? "Editar nota de esta zona" : "Agregar nota a esta zona"}" aria-label="Nota de zona"><svg class="icon"><use href="#i-clipboard"/></svg></button>
       </div>
-
       ${LEV.editandoId ? `<div class="lev-editing-banner"><svg class="icon"><use href="#i-edit"/></svg>Editando un elemento de la lista — al tocar "Añadir" se guardan los cambios. <button type="button" id="lev-cancelar-edicion">Cancelar</button></div>` : ""}
 
       <div class="lev-section">
@@ -1306,6 +1347,8 @@ function attachLevantamientoEvents() {
   if (zonaEl) zonaEl.addEventListener("input", () => { LEV.zona = zonaEl.value; });
   const nivelEl = document.getElementById("lev-nivel");
   if (nivelEl) nivelEl.addEventListener("input", () => { LEV.nivel = nivelEl.value; });
+  const btnNotaZonaActiva = document.getElementById("lev-btn-nota-zona-activa");
+  if (btnNotaZonaActiva) btnNotaZonaActiva.addEventListener("click", () => abrirModalNotaZona(LEV.zona, LEV.nivel));
 
   const dimA = document.getElementById("lev-dimA");
   if (dimA) dimA.addEventListener("input", () => { LEV.dimA = dimA.value; });
@@ -1489,6 +1532,11 @@ function attachLevantamientoEvents() {
   cont.querySelectorAll("[data-lev-zona-multiplicar]").forEach(btn => {
     btn.addEventListener("click", () => {
       abrirModalMultiplicarZona(btn.getAttribute("data-zona-raw"), btn.getAttribute("data-nivel"));
+    });
+  });
+  cont.querySelectorAll("[data-lev-zona-nota]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      abrirModalNotaZona(btn.getAttribute("data-zona-raw"), btn.getAttribute("data-nivel"));
     });
   });
 }
@@ -1714,7 +1762,7 @@ function renderTablaAgrupadaHTML(grupos) {
 
   const filas = [];
   grupos.forEach(g => {
-    g.items.forEach((r, i) => filas.push({ r, esInicioZona: i === 0, zona: g.zona }));
+    g.items.forEach((r, i) => filas.push({ r, esInicioZona: i === 0, zona: g.zona, zonaRaw: g.zonaRaw, nivel: g.nivel }));
   });
 
   return `
@@ -1728,7 +1776,7 @@ function renderTablaAgrupadaHTML(grupos) {
           <th>F Rating</th><th>Nota</th><th></th>
         </tr></thead>
         <tbody>
-          ${filas.map(({ r, esInicioZona, zona }) => {
+          ${filas.map(({ r, esInicioZona, zona, zonaRaw, nivel }) => {
             const c = computeRow(r, CONFIG);
 
             const esAisl = n(r.E) > 0;
@@ -1767,7 +1815,7 @@ function renderTablaAgrupadaHTML(grupos) {
                 </select>`;
 
             return `<tr class="${esInicioZona ? "lev-tabla-nueva-zona" : ""}">
-              <td>${esInicioZona ? `<strong>${escapeHtml(zona)}</strong>` : ""}</td>
+              <td>${esInicioZona ? `<strong>${escapeHtml(zona)}</strong>${NOTAS_ZONA[claveNotaZona(zonaRaw, nivel)] ? `<br><span class="lev-sub-label">${escapeHtml(NOTAS_ZONA[claveNotaZona(zonaRaw, nivel)])}</span>` : ""}` : ""}</td>
               <td>${escapeHtml(r.B) || "—"}</td>
               <td class="num">${r.C}</td>
               <td>${tipoLabel}</td>
@@ -1959,7 +2007,7 @@ function renderTablaJuntasHTML(grupos) {
 
   const filas = [];
   grupos.forEach(g => {
-    g.items.forEach((r, i) => filas.push({ r, esInicioZona: i === 0, zona: g.zona }));
+    g.items.forEach((r, i) => filas.push({ r, esInicioZona: i === 0, zona: g.zona, zonaRaw: g.zonaRaw, nivel: g.nivel }));
   });
 
   return `
@@ -1970,11 +2018,11 @@ function renderTablaJuntasHTML(grupos) {
           <th class="num">Longitud (cm)</th><th class="num">Ancho (cm)</th><th class="num">Espesor</th><th class="num">Sellador (cm³)</th><th class="num">Lana (unid.)</th><th>Nota</th><th></th>
         </tr></thead>
         <tbody>
-          ${filas.map(({ r, esInicioZona, zona }) => {
+          ${filas.map(({ r, esInicioZona, zona, zonaRaw, nivel }) => {
             const f = computeSingleJuntaRow(r);
             const lanaUnid = r.calcularLana ? lanaUnidadesSinRedondear(f) * r.cantidad : 0;
             return `<tr class="${esInicioZona ? "lev-tabla-nueva-zona" : ""}">
-              <td>${esInicioZona ? `<strong>${escapeHtml(zona)}</strong>` : ""}</td>
+              <td>${esInicioZona ? `<strong>${escapeHtml(zona)}</strong>${NOTAS_ZONA[claveNotaZona(zonaRaw, nivel)] ? `<br><span class="lev-sub-label">${escapeHtml(NOTAS_ZONA[claveNotaZona(zonaRaw, nivel)])}</span>` : ""}` : ""}</td>
               <td>${escapeHtml(r.B) || "—"}</td>
               <td class="num">${r.cantidad}</td>
               <td>${escapeHtml(juntaLabelCorta(r, f.superiorInferior))}</td>
@@ -2131,6 +2179,12 @@ window.getLevMode = () => LEV_MODE;
 window.abrirLevantamientoJuntas = abrirLevantamientoJuntas;
 window.cerrarLevantamiento = cerrarLevantamiento;
 window.agruparPorZona = agruparPorZona;
+// Getter, no el objeto directo — NOTAS_ZONA se REASIGNA por completo al
+// cargar un proyecto (ver cargarProyectoEnApp), y una referencia directa
+// expuesta a window quedaría apuntando al objeto viejo tras esa
+// reasignación. La función sí ve el valor actual porque vive en el mismo
+// scope de módulo.
+window.obtenerNotaZona = (zonaRaw, nivel) => NOTAS_ZONA[claveNotaZona(zonaRaw, nivel)] || null;
 window.renderLevantamiento = renderLevantamiento;
 window.agregarDesdeLevantamiento = agregarDesdeLevantamiento;
 window.PROD_LABEL = PROD_LABEL;

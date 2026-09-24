@@ -186,28 +186,58 @@ function construirReportePDF(opciones) {
   // Levantamiento: detalle fila por fila, tal como se registró.
   // Cada subsección (Penetrantes / Juntas) solo se dibuja si tiene datos —
   // si un proyecto no tiene juntas, por ejemplo, no aparece ni el título.
+  // Las filas se reordenan agrupadas por zona/nivel (igual que ya se ven
+  // agrupadas en la app) para poder insertar, justo antes de las filas de
+  // cada zona, una fila destacada con su nota — si tiene una. Antes esta
+  // tabla era plana (Zona era solo una columna repetida en cada fila, sin
+  // ningún lugar real donde "colgar" una nota de zona). Kevin, 10/09/2026:
+  // "poder colocar una nota a una zona... que salga en el PDF... junto al
+  // título de esa zona".
+  function agruparParaTablaPDF(filas, obtenerZona, obtenerNivel) {
+    const grupos = new Map();
+    const orden = [];
+    filas.forEach((r) => {
+      const zonaRaw = obtenerZona(r) || "(sin zona)";
+      const nivel = obtenerNivel(r) || "";
+      const clave = zonaRaw + "‖" + nivel;
+      if (!grupos.has(clave)) { grupos.set(clave, { zonaRaw, nivel, items: [] }); orden.push(clave); }
+      grupos.get(clave).items.push(r);
+    });
+    return orden.map((clave) => grupos.get(clave));
+  }
+  function filaNotaZonaPDF(zonaRaw, nivel, colSpan) {
+    const nota = window.obtenerNotaZona ? window.obtenerNotaZona(zonaRaw, nivel) : null;
+    if (!nota) return null;
+    return [{ content: nota, colSpan, styles: { fontStyle: "italic", fillColor: [255, 244, 224], textColor: [122, 74, 0] } }];
+  }
   if (opts.levantamiento) {
     if (computed.length > 0) {
       asegurarEspacioTabla(computed.length);
       dibujarTituloSeccion("Levantamiento — Penetrantes");
-      doc.autoTable({
-        startY: y,
-        margin: tableMargin,
-        pageBreak: "auto",
-        rowPageBreak: "avoid",
-        head: [["Zona", "Nivel", "Cant.", "Penetrante", "Dimensión", "Anular", "Barrera", "Producto", "Espesor", "Vueltas Cinta", "F Rating", "Nota"]],
-        body: computed.map(r => {
+      const bodyPen = [];
+      agruparParaTablaPDF(computed, (r) => r.A, (r) => r.B).forEach((g) => {
+        const filaNota = filaNotaZonaPDF(g.zonaRaw, g.nivel, 12);
+        if (filaNota) bodyPen.push(filaNota);
+        g.items.forEach((r) => {
           const esCinta = r.P === MAT_CINTA_CON || r.P === MAT_CINTA_SIN;
           const vueltas = esCinta ? vueltasCintaPenetrante(r) : null;
-          return [
+          bodyPen.push([
             r.A || "-", r.B || "-", String(r.C), TIPO_LABEL_CORTO[r.L] || r.L,
             dimensionPenetrantePDF(r),
             formatFraccionPulgadas(r.I), `${r.M}${r.MEM ? " (membrana)" : ""} / ${r.N}`,
             r.P || "—",
             formatEspesorPenetrante(r.P, r.V),
             vueltas !== null ? vueltas : "—", r.O, r.R || "",
-          ];
-        }),
+          ]);
+        });
+      });
+      doc.autoTable({
+        startY: y,
+        margin: tableMargin,
+        pageBreak: "auto",
+        rowPageBreak: "avoid",
+        head: [["Zona", "Nivel", "Cant.", "Penetrante", "Dimensión", "Anular", "Barrera", "Producto", "Espesor", "Vueltas Cinta", "F Rating", "Nota"]],
+        body: bodyPen,
         styles: { fontSize: 8, cellPadding: 4 },
         headStyles: { fillColor: [26, 26, 26], textColor: 255 },
         didDrawPage: dibujarCabeceraPagina,
@@ -218,19 +248,27 @@ function construirReportePDF(opciones) {
     if (computedJ_pdf.length > 0) {
       asegurarEspacioTabla(computedJ_pdf.length);
       dibujarTituloSeccion("Levantamiento — Juntas");
+      const bodyJun = [];
+      agruparParaTablaPDF(computedJ_pdf, (r) => r.A, (r) => r.B).forEach((g) => {
+        const filaNota = filaNotaZonaPDF(g.zonaRaw, g.nivel, 10);
+        if (filaNota) bodyJun.push(filaNota);
+        g.items.forEach((r) => {
+          bodyJun.push([
+            r.A || "-", r.B || "-", String(r.cantidad),
+            juntaLabelCorta(r, r.superiorInferior), barrerasLabelCorto(r.barreras), r.producto,
+            String(r.longitud), String(r.ancho),
+            r.espesorProductoIn !== null && r.espesorProductoIn !== undefined ? formatFraccionPulgadas(r.espesorProductoIn) : "—",
+            r.nota || "-",
+          ]);
+        });
+      });
       doc.autoTable({
         startY: y,
         margin: tableMargin,
         pageBreak: "auto",
         rowPageBreak: "avoid",
         head: [["Zona", "Nivel", "Cant.", "Junta", "Barreras", "Producto", "Longitud (cm)", "Ancho (cm)", "Espesor", "Nota"]],
-        body: computedJ_pdf.map(r => [
-              r.A || "-", r.B || "-", String(r.cantidad),
-              juntaLabelCorta(r, r.superiorInferior), barrerasLabelCorto(r.barreras), r.producto,
-              String(r.longitud), String(r.ancho),
-              r.espesorProductoIn !== null && r.espesorProductoIn !== undefined ? formatFraccionPulgadas(r.espesorProductoIn) : "—",
-              r.nota || "-",
-          ]),
+        body: bodyJun,
         styles: { fontSize: 8, cellPadding: 4 },
         headStyles: { fillColor: [26, 26, 26], textColor: 255 },
         didDrawPage: dibujarCabeceraPagina,

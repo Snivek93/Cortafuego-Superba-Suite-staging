@@ -142,6 +142,7 @@ function aplicarProyectoImportado(data) {
   INFORMES_ACREDITACION = Array.isArray(data.informes) ? data.informes : [];
   INFORME_ACR_SEQ = INFORMES_ACREDITACION.reduce((m, i) => Math.max(m, i.id || 0), 0) + 1;
   GRUPOS_CUANTIFICACION = data.gruposCuantificacion && typeof data.gruposCuantificacion === "object" ? data.gruposCuantificacion : { activo: false, asignaciones: {} };
+  NOTAS_ZONA = data.notasZona && typeof data.notasZona === "object" ? data.notasZona : {};
   sincronizarCamposConfig();
   renderTable();
   if (ACTIVE_TAB === "resumen") renderResumen();
@@ -252,6 +253,7 @@ function datosProyectoActual() {
     planos: PLANOS,
     informes: INFORMES_ACREDITACION,
     gruposCuantificacion: GRUPOS_CUANTIFICACION,
+    notasZona: NOTAS_ZONA,
   };
   if (JSON.stringify(MAIN_TABLE) !== MAIN_TABLE_DEFAULT_JSON) payload.mainTableOverride = MAIN_TABLE;
   if (JSON.stringify(JUNTAS_TABLE) !== JUNTAS_TABLE_DEFAULT_JSON) payload.juntasTableOverride = JUNTAS_TABLE;
@@ -284,6 +286,7 @@ function cargarDatosEmbebidos() {
     INFORMES_ACREDITACION = Array.isArray(data.informes) ? data.informes : [];
     INFORME_ACR_SEQ = INFORMES_ACREDITACION.reduce((m, i) => Math.max(m, i.id || 0), 0) + 1;
     GRUPOS_CUANTIFICACION = data.gruposCuantificacion && typeof data.gruposCuantificacion === "object" ? data.gruposCuantificacion : { activo: false, asignaciones: {} };
+  NOTAS_ZONA = data.notasZona && typeof data.notasZona === "object" ? data.notasZona : {};
     return true;
   } catch (e) {
     return false;
