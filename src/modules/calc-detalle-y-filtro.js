@@ -5,6 +5,15 @@
 // le hace reasignación directa (no solo mutación) -- ver nota igual en
 // ui-tabla-calculadora.js sobre por qué esto es necesario.
 var FILTRO_CALC = "";
+// Grupos de cuantificación por zona — separar la tabla de Materiales en
+// varias tablas (una por grupo de zonas/niveles), en vez de una sola
+// combinada. Se guarda CON el proyecto (mismo patrón que PLANOS/
+// INFORMES_ACREDITACION) porque es un dato propio de ESE levantamiento, no
+// una preferencia del dispositivo. Kevin, 10/09/2026: "un proyecto que el
+// nivel 1 esté dividido en zonas A y zona B... poder separar la
+// cuantificación de A y B". Opcional a propósito — por defecto `activo` es
+// false y la tabla se ve exactamente como siempre.
+var GRUPOS_CUANTIFICACION = { activo: false, asignaciones: {} };
 
 (function () {
 // ============================================================================
@@ -229,6 +238,124 @@ function attachTableEvents() {
   });
 }
 
+// ============================================================================
+// Separar la cuantificación de Materiales por grupos de zonas — Kevin,
+// 10/09/2026. Cada zona/nivel del levantamiento (Penetrantes + Juntas
+// combinados, ya que ambos alimentan la misma tabla de Materiales) se le
+// puede asignar un nombre de grupo a mano; con eso, la tabla de Materiales
+// se calcula UNA VEZ POR GRUPO en vez de una sola vez combinada. Los
+// ítems agregados a mano (sin fila real, sin zona) quedan fuera de la
+// separación — se muestran aparte, en su propia sección "Agregados a
+// mano", para no inventarles una zona que no tienen.
+// ============================================================================
+function claveZonaNivel(r) {
+  return (r.A || "(sin zona)") + "‖" + (r.B || "");
+}
+function todasLasZonaNivelUsadas() {
+  const claves = new Map();
+  ROWS.filter(tieneDatosMinimos).forEach((r) => {
+    const clave = claveZonaNivel(r);
+    if (!claves.has(clave)) claves.set(clave, { zonaRaw: r.A || "(sin zona)", nivel: r.B || "" });
+  });
+  ROWS_J.filter(tieneDatosMinimosJunta).forEach((r) => {
+    const clave = claveZonaNivel(r);
+    if (!claves.has(clave)) claves.set(clave, { zonaRaw: r.A || "(sin zona)", nivel: r.B || "" });
+  });
+  return Array.from(claves.entries()).map(([clave, info]) => Object.assign({ clave, label: info.nivel ? `${info.zonaRaw} — Nivel ${info.nivel}` : info.zonaRaw }, info));
+}
+function nombresDeGruposUsados() {
+  return Array.from(new Set(Object.values(GRUPOS_CUANTIFICACION.asignaciones).filter(Boolean)));
+}
+function itemsMaterialesParaGrupo(nombreGrupo) {
+  const pertenece = (r) => (GRUPOS_CUANTIFICACION.asignaciones[claveZonaNivel(r)] || null) === nombreGrupo;
+  const computedFiltrado = computeAllRows().filter(tieneDatosMinimos).filter(pertenece);
+  const computedJFiltrado = computeAllJuntaRows().filter(tieneDatosMinimosJunta).filter(pertenece);
+  const resumen = computeResumen(computedFiltrado, CONFIG.C17, { FS_ONE_MAX: CONFIG.UMB_FS, CP606: CONFIG.UMB_CP606, CFS_SIL_GG: CONFIG.UMB_SILGG });
+  mezclarResumenJuntas(resumen, computedJFiltrado);
+  return resumen.items;
+}
+function filaTablaMaterial(it) {
+  const esCollar = it.tipo === "COLLARÍN";
+  const extra = Number(it.manualExtra) || 0;
+  const badge = it.manual ? ' <span class="badge-manual" title="Agregado a mano">manual</span>' : (extra > 0 ? ` <span class="badge-manual" title="De la cantidad total, ${extra} se agregó a mano">incluye ${extra} manual</span>` : "");
+  return `<tr class="${it.manual ? "fila-manual" : ""}">
+    <td>${escapeHtml(it.codigo)}</td>
+    <td class="num">${it.cantidad}</td>
+    <td><strong>${escapeHtml(tituloCaseProducto(it.producto))}</strong>${badge}</td>
+    <td>${escapeHtml(it.presentacion)}</td>
+    <td>${escapeHtml(tituloCase(it.tipo))}</td>
+    <td></td>
+  </tr>`;
+}
+function renderMaterialesAgrupadoHTML() {
+  const nombres = nombresDeGruposUsados();
+  const itemsSinAsignar = itemsMaterialesParaGrupo(null);
+  const bloques = nombres.map((nombre) => {
+    const items = itemsMaterialesParaGrupo(nombre);
+    return `
+      <div class="resumen-section" style="margin-bottom:14px;">
+        <h3 style="margin:0 0 10px;font-size:var(--fs-base);">${escapeHtml(nombre)}</h3>
+        <div class="table-scroll">
+          <table class="resumen-table">
+            <thead><tr><th>Código</th><th class="num">Cantidad</th><th>Producto</th><th>Presentación</th><th>Tipo</th><th></th></tr></thead>
+            <tbody>${items.length ? items.map(filaTablaMaterial).join("") : `<tr><td colspan="6" class="empty-state">Sin materiales en este grupo.</td></tr>`}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }).join("");
+  const bloqueSinAsignar = itemsSinAsignar.length ? `
+    <div class="resumen-section" style="margin-bottom:14px;">
+      <h3 style="margin:0 0 10px;font-size:var(--fs-base);color:var(--text-muted);">Sin asignar a un grupo</h3>
+      <div class="table-scroll">
+        <table class="resumen-table">
+          <thead><tr><th>Código</th><th class="num">Cantidad</th><th>Producto</th><th>Presentación</th><th>Tipo</th><th></th></tr></thead>
+          <tbody>${itemsSinAsignar.map(filaTablaMaterial).join("")}</tbody>
+        </table>
+      </div>
+    </div>` : "";
+  return bloques + bloqueSinAsignar || `<p class="hint">Todavía no armaste ningún grupo — tocá "Separar por zonas" para crearlos.</p>`;
+}
+function abrirModalSepararPorZonas() {
+  const zonas = todasLasZonaNivelUsadas();
+  const nombresExistentes = nombresDeGruposUsados();
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-box modal-box-wide">
+      <p style="font-weight:600;margin:0 0 4px;">Separar cuantificación por zonas</p>
+      <p class="hint" style="margin:0 0 12px;">Asignale un grupo a cada zona/nivel. Las que dejes en blanco quedan aparte, en "Sin asignar".</p>
+      <datalist id="lista-grupos-cuantificacion">${nombresExistentes.map((n) => `<option value="${escapeHtml(n)}">`).join("")}</datalist>
+      <div class="diff-scroll" style="max-height:320px;">
+        ${zonas.length === 0 ? `<p class="hint">Todavía no hay zonas cargadas en el levantamiento.</p>` : zonas.map((z) => `
+          <div class="invitacion-espacio-fila">
+            <p class="invitacion-espacio-nombre" style="margin:0;">${escapeHtml(z.label)}</p>
+            <input type="text" list="lista-grupos-cuantificacion" data-zona-grupo="${escapeHtml(z.clave)}" value="${escapeHtml(GRUPOS_CUANTIFICACION.asignaciones[z.clave] || "")}" placeholder="Sin grupo" style="width:150px;">
+          </div>`).join("")}
+      </div>
+      <div class="modal-actions" style="margin-top:14px;">
+        <button class="secondary" data-act="cancel">Cancelar</button>
+        <button class="primary" data-act="aplicar">Aplicar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.dataset.act === "cancel") { overlay.remove(); return; }
+    if (e.target.dataset.act === "aplicar") {
+      const nuevasAsignaciones = {};
+      overlay.querySelectorAll("[data-zona-grupo]").forEach((input) => {
+        const nombre = input.value.trim();
+        if (nombre) nuevasAsignaciones[input.getAttribute("data-zona-grupo")] = nombre;
+      });
+      GRUPOS_CUANTIFICACION.asignaciones = nuevasAsignaciones;
+      GRUPOS_CUANTIFICACION.activo = Object.keys(nuevasAsignaciones).length > 0;
+      marcarCambio();
+      overlay.remove();
+      renderResumen();
+      mostrarToast(GRUPOS_CUANTIFICACION.activo ? "Cuantificación separada por zonas." : "Sin grupos asignados — se muestra la tabla combinada de siempre.");
+    }
+  });
+}
+
 function renderResumen() {
   const computed = computeAllRows().filter(tieneDatosMinimos);
   const resumen = computeResumen(computed, CONFIG.C17, {
@@ -304,6 +431,27 @@ function renderResumen() {
     matBody.querySelectorAll(".btn-editar-collar").forEach(btn => {
       btn.addEventListener("click", () => abrirModalCollar(btn.dataset.collarCode, filasCollar));
     });
+  }
+
+  // Modo "separar por zonas" — opcional (Kevin, 10/09/2026). Por defecto
+  // (GRUPOS_CUANTIFICACION.activo === false) esto no cambia nada y la
+  // tabla de arriba se ve exactamente como siempre.
+  const vistaCombinada = document.getElementById("materiales-vista-combinada");
+  const vistaAgrupada = document.getElementById("materiales-vista-agrupada");
+  if (vistaCombinada && vistaAgrupada) {
+    if (GRUPOS_CUANTIFICACION.activo) {
+      vistaCombinada.style.display = "none";
+      vistaAgrupada.style.display = "";
+      vistaAgrupada.innerHTML = renderMaterialesAgrupadoHTML();
+    } else {
+      vistaCombinada.style.display = "";
+      vistaAgrupada.style.display = "none";
+    }
+  }
+  const btnSepararZonas = document.getElementById("btn-separar-zonas");
+  if (btnSepararZonas) {
+    btnSepararZonas.classList.toggle("modo-btn-active", GRUPOS_CUANTIFICACION.activo);
+    btnSepararZonas.addEventListener("click", abrirModalSepararPorZonas);
   }
 
   const btnAgregarManual = document.getElementById("btn-agregar-manual");

@@ -596,6 +596,7 @@ function cargarProyectoEnApp(data) {
   PLANO_SEQ = PLANOS.reduce((m, p) => Math.max(m, p.id || 0), 0) + 1;
   INFORMES_ACREDITACION = Array.isArray(data.informes) ? data.informes : [];
   INFORME_ACR_SEQ = INFORMES_ACREDITACION.reduce((m, i) => Math.max(m, i.id || 0), 0) + 1;
+  GRUPOS_CUANTIFICACION = data.gruposCuantificacion && typeof data.gruposCuantificacion === "object" ? data.gruposCuantificacion : { activo: false, asignaciones: {} };
   sincronizarCamposConfig();
   const pn = document.getElementById("proj-nombre"); if (pn) pn.value = PROJECT_INFO.nombre;
   const pc = document.getElementById("proj-cliente"); if (pc) pc.value = PROJECT_INFO.cliente;
