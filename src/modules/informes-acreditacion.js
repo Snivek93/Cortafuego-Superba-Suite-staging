@@ -545,7 +545,7 @@ function precargarElementosDesdeLevantamiento() {
   const agregados = [];
   (window.ROWS || []).forEach((r) => {
     if (!r || !r.L || !r.N || !r.M || !r.P) return;
-    const espacioAnular = (window.n ? window.n(r.I) : parseFloat(r.I)) > 0;
+    const espacioAnular = r.L === "Vacío" ? false : (window.n ? window.n(r.I) : parseFloat(r.I)) > 0;
     let diametro = "";
     if (esTuberiaCombustible(r.L)) {
       const d = window.n ? window.n(r.D) : parseFloat(r.D);
@@ -804,7 +804,7 @@ function abrirModalElemento(categoria, editandoId) {
     if (!el) return;
     ACR_ELEMENTO_EDITANDO_ID = editandoId;
     ACR_ELEMENTO_FORM = el.categoria === "penetrante"
-      ? { categoria: "penetrante", material: el.material, tipo: el.tipoPenetrante, ubicacion: el.ubicacion, espacioAnular: el.espacioAnular, diametroPulg: el.diametroPulg != null ? String(el.diametroPulg) : "", producto: el.producto }
+      ? { categoria: "penetrante", material: el.material, tipo: el.tipoPenetrante, ubicacion: el.ubicacion, espacioAnular: el.tipoPenetrante === "Vacío" ? false : el.espacioAnular, diametroPulg: el.diametroPulg != null ? String(el.diametroPulg) : "", producto: el.producto }
       : { categoria: "junta", tipo: el.juntaTipo, barreras: el.juntaBarreras, posicion: el.juntaPosicion, producto: el.producto };
   } else {
     ACR_ELEMENTO_EDITANDO_ID = null;
@@ -854,13 +854,13 @@ function renderModalElemento() {
           ${COMBOS_UBICACION_MATERIAL.map((c) => acrChipCombo(["ubicacion", "material"], [c.ubicacion, c.material], c.label, f.ubicacion === c.ubicacion && f.material === c.material)).join("")}
         </div>
       </div>
-      <div class="acr-modal-seccion">
+      ${f.tipo === "Vacío" ? "" : `<div class="acr-modal-seccion">
         <div class="acr-modal-seccion-titulo">Espacio anular</div>
         <div class="lev-chip-grid lev-chip-grid-compact">
           ${acrChip("espacioAnular", "0", "Sin espacio anular", !f.espacioAnular)}
           ${acrChip("espacioAnular", "1", "Con espacio anular", !!f.espacioAnular)}
         </div>
-      </div>
+      </div>`}
       ${esCombustible ? `
       <div class="acr-modal-seccion">
         <div class="acr-modal-seccion-titulo">${esAislada ? "Diámetro exterior total (con aislante)" : "Diámetro de la tubería"}</div>
@@ -888,7 +888,7 @@ function renderModalElemento() {
           const nv = window.vueltasCintaPenetrante({ L: f.tipo, M: f.ubicacion, N: f.material, P: f.producto, D: diametroPulgNum, E: 0 });
           if (typeof nv !== "number") return "";
           return `<p class="acr-vueltas-preview"><strong>${nv} vuelta${nv === 1 ? "" : "s"}</strong> de cinta intumescente para ${fraccion(diametroPulgNum)}.</p>`;
-        })()}` : `<p class="hint">No hay un sistema UL registrado para esa combinación — probá otra ubicación o espacio anular.</p>`) : ""}`;
+        })()}` : `<p class="hint">No hay un sistema UL registrado para esa combinación — probá otra ubicación${f.tipo === "Vacío" ? "" : " o espacio anular"}.</p>`) : ""}`;
   } else {
     const tipos = (window.todosLosTipos ? window.todosLosTipos() : []).map((x) => x.tipo);
     const junta = f.tipo && window.juntaParaTipo ? window.juntaParaTipo(f.tipo) : null;
@@ -973,7 +973,7 @@ function bindModalElementoEventos(overlay) {
       ACR_ELEMENTO_FORM[campo] = valor;
       if (campo === "diametroPulg") { ACR_ELEMENTO_FORM.diametroOtro = false; ACR_ELEMENTO_FORM.producto = ""; }
       if (campo === "material" || campo === "ubicacion" || campo === "espacioAnular") ACR_ELEMENTO_FORM.producto = "";
-      if (campo === "tipo") { ACR_ELEMENTO_FORM.barreras = ""; ACR_ELEMENTO_FORM.posicion = ""; ACR_ELEMENTO_FORM.producto = ""; ACR_ELEMENTO_FORM.diametroPulg = ""; ACR_ELEMENTO_FORM.diametroOtro = false; }
+      if (campo === "tipo") { ACR_ELEMENTO_FORM.barreras = ""; ACR_ELEMENTO_FORM.posicion = ""; ACR_ELEMENTO_FORM.producto = ""; ACR_ELEMENTO_FORM.diametroPulg = ""; ACR_ELEMENTO_FORM.diametroOtro = false; if (valor === "Vacío") ACR_ELEMENTO_FORM.espacioAnular = false; }
       if (campo === "barreras") { ACR_ELEMENTO_FORM.posicion = ""; ACR_ELEMENTO_FORM.producto = ""; }
       if (campo === "posicion") { ACR_ELEMENTO_FORM.producto = ""; }
       renderModalElemento();
@@ -2061,7 +2061,7 @@ function confirmarNuevoElemento() {
     const opciones = opcionesProductoPenetrante(f.material, f.tipo, f.ubicacion, f.espacioAnular, diametroCategoria);
     const encontrado = opciones.find((o) => o.producto === f.producto);
     if (!encontrado) { if (window.mostrarToast) mostrarToast("No se pudo agregar — probá elegir el producto de nuevo.", "error"); return; }
-    nuevoElemento = { id: ACR_ELEMENTO_EDITANDO_ID != null ? ACR_ELEMENTO_EDITANDO_ID : Date.now() + Math.random(), categoria: "penetrante", subtipo: null, material: f.material, tipoPenetrante: f.tipo, ubicacion: f.ubicacion, espacioAnular: f.espacioAnular, diametroPulg: tieneDiametro ? diametroPulgNum : null, producto: f.producto, sistemaUL: encontrado.sistemaUL, espesor: encontrado.espesor, traslape: null };
+    nuevoElemento = { id: ACR_ELEMENTO_EDITANDO_ID != null ? ACR_ELEMENTO_EDITANDO_ID : Date.now() + Math.random(), categoria: "penetrante", subtipo: null, material: f.material, tipoPenetrante: f.tipo, ubicacion: f.ubicacion, espacioAnular: f.tipo === "Vacío" ? false : !!f.espacioAnular, diametroPulg: tieneDiametro ? diametroPulgNum : null, producto: f.producto, sistemaUL: encontrado.sistemaUL, espesor: encontrado.espesor, traslape: null };
     // Vueltas de cinta reales, usando la misma tabla oficial que el motor de
     // cálculo de Levantamiento (vueltasCintaPenetrante) — solo aplica para
     // productos de cinta intumescente en tuberías combustibles.
@@ -2294,6 +2294,81 @@ async function bytesPDFRemoto(url) {
   } catch (e) { return null; }
 }
 
+// Firma de Sebastián: vive en un archivo aparte (src/modules/firma-sebastian.js) que se
+// carga bajo demanda, solo cuando el informe lo firma él. Si el archivo no está o falla la
+// carga, el informe sale igual (solo con la línea de firma).
+function cargarFirmaSebastian() {
+  if (window.FIRMA_SEBASTIAN_PNG) return Promise.resolve(window.FIRMA_SEBASTIAN_PNG);
+  return new Promise((resolve) => {
+    let listo = false;
+    const fin = () => { if (listo) return; listo = true; resolve(window.FIRMA_SEBASTIAN_PNG || null); };
+    try {
+      const s = document.createElement("script");
+      s.src = "src/modules/firma-sebastian.js";
+      s.onload = fin; s.onerror = fin;
+      document.head.appendChild(s);
+    } catch (e) { fin(); return; }
+    setTimeout(fin, 6000);
+  });
+}
+
+// Entrega del PDF del informe. En iPhone/iPad un enlace de descarga (blob:) abre el PDF en
+// otra pantalla en vez de descargarlo, así que ahí se usa el menú nativo de compartir
+// (Guardar en Archivos, WhatsApp, etc.). En el resto de dispositivos se descarga directo.
+const ES_IOS_INFORME = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+function descargarBlobInforme(blob, nombre) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = nombre; a.rel = "noopener";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+// El menú de compartir exige un toque reciente del usuario; si generar el PDF tardó y ya
+// no cuenta, se pide un toque nuevo con este aviso.
+function pedirToqueParaGuardarPDF(file, nombre) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "instr-modal-overlay open"; overlay.style.zIndex = "9999"; overlay.style.display = "flex";
+    const box = document.createElement("div");
+    box.className = "instr-modal"; box.style.maxWidth = "360px";
+    box.innerHTML = `
+      <div class="instr-modal-header"><span>PDF listo</span></div>
+      <div style="padding:20px 24px">
+        <p style="margin:0 0 16px;font-size:var(--fs-sm);color:var(--text-secondary)">El informe ya está generado. Tocá el botón para guardarlo o compartirlo.</p>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button type="button" class="secondary" data-pdf-cancelar>Cancelar</button>
+          <button type="button" class="primary" data-pdf-guardar>Guardar / compartir PDF</button>
+        </div>
+      </div>`;
+    overlay.appendChild(box); document.body.appendChild(overlay);
+    const cerrar = (r) => { overlay.remove(); resolve(r); };
+    box.querySelector("[data-pdf-cancelar]").addEventListener("click", () => cerrar("cancelado"));
+    box.querySelector("[data-pdf-guardar]").addEventListener("click", async () => {
+      try { await navigator.share({ files: [file], title: nombre }); cerrar("compartido"); }
+      catch (err) {
+        if (err && err.name === "AbortError") { cerrar("cancelado"); return; }
+        descargarBlobInforme(file, nombre); cerrar("descargado");
+      }
+    });
+  });
+}
+async function entregarPDFInforme(bytes, nombre) {
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  if (ES_IOS_INFORME && navigator.share && navigator.canShare) {
+    try {
+      const file = new File([blob], nombre, { type: "application/pdf" });
+      if (navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: nombre }); return "compartido"; }
+        catch (err) {
+          if (err && err.name === "AbortError") return "cancelado";
+          return await pedirToqueParaGuardarPDF(file, nombre);
+        }
+      }
+    } catch (e) {}
+  }
+  descargarBlobInforme(blob, nombre);
+  return "descargado";
+}
+
 async function generarPDFInformeAcreditacion(informeId) {
   const informe = INFORMES_ACREDITACION.find((i) => i.id === informeId);
   if (!informe) return;
@@ -2304,7 +2379,8 @@ async function generarPDFInformeAcreditacion(informeId) {
     const doc = new jsPDF({ unit: "pt", format: "letter", orientation: "portrait" });
     const titulo = `Informe de Acreditación ${informe.tipoInforme === "final" ? "Final" : "de Avance"} de Sellos Cortafuego`;
     const marginL = 72, anchoTexto = 468, FS = 10.5, LH = 14.5;
-    let safe = window.dibujarLetterheadPDF ? window.dibujarLetterheadPDF(doc, titulo) : { top: 140, bottom: 735 };
+    if (!window.dibujarLetterheadPDF) throw new Error("no se cargó el membrete de la hoja. Recargá la app e intentá de nuevo");
+    let safe = window.dibujarLetterheadPDF(doc, titulo);
     let y = safe.top;
     // dibujarLetterheadPDF pinta el título del membretado y deja el documento
     // con SU fuente (helvetica normal, tamaño auto-ajustado 8–13 pt según el
@@ -2318,7 +2394,7 @@ async function generarPDFInformeAcreditacion(informeId) {
       let fPrev = null, sizePrev = null, colorPrev = null;
       try { fPrev = doc.getFont(); sizePrev = doc.getFontSize(); colorPrev = doc.getTextColor(); } catch (e) {}
       doc.addPage();
-      safe = window.dibujarLetterheadPDF ? window.dibujarLetterheadPDF(doc, titulo) : { top: 140, bottom: 735 };
+      safe = window.dibujarLetterheadPDF(doc, titulo);
       y = safe.top;
       try {
         if (fPrev && fPrev.fontName) doc.setFont(fPrev.fontName, fPrev.fontStyle || "normal");
@@ -2362,8 +2438,14 @@ async function generarPDFInformeAcreditacion(informeId) {
         y += 8;
       } else { escribirParrafo(bloque.texto, { justificar: bloque.t === "p" }); }
     });
-    asegurar(90); y += 20;
-    escribirParrafo("Atentamente,", { espacioDespues: 34 });
+    const firmaSeb = informe.inspector === "sebastian" ? await cargarFirmaSebastian() : null;
+    asegurar(firmaSeb ? 150 : 90); y += 20;
+    escribirParrafo("Atentamente,", { espacioDespues: firmaSeb ? 4 : 34 });
+    if (firmaSeb) {
+      const firmaW = 130, firmaH = firmaW * (window.FIRMA_SEBASTIAN_RATIO || 0.4929);
+      try { doc.addImage(firmaSeb, "PNG", marginL, y, firmaW, firmaH, undefined, "FAST"); } catch (e) {}
+      y += firmaH - 10;
+    }
     doc.setDrawColor(120, 120, 120); doc.line(marginL, y, marginL + 220, y); y += 14;
     escribirParrafo(nombreInspectorFirma(informe.inspector), { negrita: true, espacioDespues: 2 });
     escribirParrafo("Departamento de Ingeniería Superba", { espacioDespues: 0 });
@@ -2393,7 +2475,7 @@ async function generarPDFInformeAcreditacion(informeId) {
     if (fotos.length) {
       nuevaPagina();
       escribirParrafo("ANEXO FOTOGRÁFICO", { negrita: true, size: FS + 1, espacioDespues: 14 });
-      const imgMaxW = 380, imgMaxH = 300;
+      const imgMaxW = anchoTexto, imgMaxH = Math.max(240, (safe.bottom - safe.top) - 60);
       fotos.forEach((foto, idx) => {
         let w = imgMaxW, h = imgMaxH;
         try { const props = doc.getImageProperties(foto.dataUrl); if (props && props.width && props.height) { const escala = Math.min(imgMaxW / props.width, imgMaxH / props.height); w = props.width * escala; h = props.height * escala; } } catch (e) {}
@@ -2402,7 +2484,8 @@ async function generarPDFInformeAcreditacion(informeId) {
         try { doc.addImage(foto.dataUrl, "JPEG", imgX, y, w, h, undefined, "FAST"); } catch (e) {}
         y += h + 14;
         doc.setFont("helvetica", "italic"); doc.setFontSize(FS - 1);
-        const caption = `Figura ${idx + 1}. ${foto.descripcion || "Sin descripción"}`;
+        const descFoto = (foto.descripcion || "").trim();
+      const caption = descFoto ? `Figura ${idx + 1}. ${descFoto}` : `Figura ${idx + 1}`;
         doc.splitTextToSize(caption, anchoTexto).forEach((l) => { asegurar(LH); doc.text(l, marginL + anchoTexto / 2, y, { align: "center" }); y += LH; });
         doc.setFont("helvetica", "normal"); y += 20;
       });
@@ -2437,12 +2520,9 @@ async function generarPDFInformeAcreditacion(informeId) {
       } catch (e) {}
       if (fallidos && window.mostrarToast) mostrarToast(`${fallidos} sistema(s) UL no se pudieron adjuntar automáticamente.`, "error");
     }
-    const blob = new Blob([bytesFinales], { type: "application/pdf" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = nombreArchivo;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
-    if (window.mostrarToast) mostrarToast("PDF del informe generado.");
+    if (toast && window.ocultarToastProgreso) ocultarToastProgreso(toast);
+    const resultadoEntrega = await entregarPDFInforme(bytesFinales, nombreArchivo);
+    if (window.mostrarToast && resultadoEntrega !== "cancelado") mostrarToast(resultadoEntrega === "compartido" ? "PDF del informe compartido." : "PDF del informe descargado.");
   } catch (err) {
     console.error("generarPDFInformeAcreditacion:", err);
     if (window.mostrarToast) mostrarToast("No se pudo generar el PDF: " + err.message, "error");
@@ -2456,5 +2536,6 @@ document.addEventListener("DOMContentLoaded", () => {
   if (btnAbrir) btnAbrir.addEventListener("click", abrirVisorAcreditacion);
 });
 
+setTimeout(() => { try { cargarFirmaSebastian(); } catch (e) {} }, 5000);
 window.abrirVisorAcreditacion = abrirVisorAcreditacion;
 })();
