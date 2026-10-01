@@ -1043,6 +1043,14 @@ button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
 .proy-card-carpeta-icono { color: var(--hilti-red); width: 20px; height: 20px; margin-right: 4px; }
 .proy-carpeta-contador { font-size: var(--fs-xs); color: var(--text-muted); flex-shrink: 0; }
 .proy-btn-nueva-carpeta { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; max-width: 560px; margin-top: 10px; background: transparent; border: 1px dashed var(--border); border-radius: 12px; padding: 10px; font-size: var(--fs-sm); color: var(--text-secondary); cursor: pointer; }
+/* Nueva carpeta en la misma fila que A-Z / Reciente / Manual, a la derecha */
+.proy-orden-fila { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; max-width: 560px; }
+.proy-orden-fila .proy-orden-control { margin-bottom: 0; }
+.proy-orden-fila-solo-boton { justify-content: flex-end; }
+.proy-btn-nueva-carpeta-arriba { width: auto; max-width: none; margin-top: 0; margin-left: auto; padding: 6px 10px; border-style: solid; border-radius: 8px; font-size: var(--fs-xs); font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+.proy-btn-nueva-carpeta-arriba .icon { width: 14px; height: 14px; }
+.proy-nc-corto { display: none; }
+@media (max-width: 420px) { .proy-nc-largo { display: none; } .proy-nc-corto { display: inline; } }
 .proy-card-grip { color: var(--text-muted); width: 18px; height: 18px; flex-shrink: 0; cursor: grab; touch-action: none; }
 .proy-card-mover { flex-shrink: 0; background: transparent; border: none; color: var(--text-muted); padding: 6px; border-radius: var(--radius-sm); cursor: pointer; display: flex; }
 @media (hover: hover) and (pointer: fine) { .proy-card-mover:hover { color: var(--ink); background: var(--grey-1); } }
