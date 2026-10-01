@@ -2369,6 +2369,38 @@ async function entregarPDFInforme(bytes, nombre) {
   return "descargado";
 }
 
+// Membrete garantizado. Dibuja el membrete y COMPRUEBA que de verdad quedó en la página
+// (que se hayan emitido las imágenes del encabezado y del pie). Si la función de pdf-comun.js
+// no existe, falla o no dibujó nada, lo dibuja directo con las imágenes incrustadas. Si ni así
+// se puede, falla con un aviso claro: nunca se entrega un informe sin membrete.
+function contarImagenesPagina(doc) {
+  const pag = doc.internal.getCurrentPageInfo().pageNumber;
+  const lineas = (doc.internal.pages && doc.internal.pages[pag]) || [];
+  let n = 0;
+  for (const l of lineas) if (/\/[A-Za-z]+\d+\s+Do\b/.test(String(l))) n++;
+  return n;
+}
+function dibujarMembreteDirecto(doc) {
+  if (!window.LETTERHEAD_HEADER_PNG || !window.LETTERHEAD_FOOTER_PNG) throw new Error("faltan las imágenes del membrete");
+  doc.addImage(window.LETTERHEAD_HEADER_PNG, "PNG", 0, 0, 612, 125, undefined, "FAST");
+  doc.addImage(window.LETTERHEAD_FOOTER_PNG, "PNG", 0, 734, 612, 58, undefined, "FAST");
+  return { top: 140, bottom: 735 };
+}
+function pintarMembreteGarantizado(doc, titulo) {
+  const pag = doc.internal.getCurrentPageInfo().pageNumber;
+  const antes = contarImagenesPagina(doc);
+  let safe = null;
+  try { if (window.dibujarLetterheadPDF) safe = window.dibujarLetterheadPDF(doc, titulo); } catch (e) { safe = null; }
+  if (!safe || contarImagenesPagina(doc) - antes < 2) {
+    console.warn("Informe: el membrete normal no quedó en la página " + pag + "; se dibuja con el respaldo directo.");
+    const antes2 = contarImagenesPagina(doc);
+    try { safe = dibujarMembreteDirecto(doc); } catch (e) { safe = null; }
+    if (!safe || contarImagenesPagina(doc) - antes2 < 2) throw new Error("no se pudo dibujar el membrete de la hoja. Recargá la app e intentá de nuevo");
+  }
+  (doc.__membretePags = doc.__membretePags || new Set()).add(pag);
+  return safe;
+}
+
 async function generarPDFInformeAcreditacion(informeId) {
   const informe = INFORMES_ACREDITACION.find((i) => i.id === informeId);
   if (!informe) return;
@@ -2379,8 +2411,7 @@ async function generarPDFInformeAcreditacion(informeId) {
     const doc = new jsPDF({ unit: "pt", format: "letter", orientation: "portrait" });
     const titulo = `Informe de Acreditación ${informe.tipoInforme === "final" ? "Final" : "de Avance"} de Sellos Cortafuego`;
     const marginL = 72, anchoTexto = 468, FS = 10.5, LH = 14.5;
-    if (!window.dibujarLetterheadPDF) throw new Error("no se cargó el membrete de la hoja. Recargá la app e intentá de nuevo");
-    let safe = window.dibujarLetterheadPDF(doc, titulo);
+    let safe = pintarMembreteGarantizado(doc, titulo);
     let y = safe.top;
     // dibujarLetterheadPDF pinta el título del membretado y deja el documento
     // con SU fuente (helvetica normal, tamaño auto-ajustado 8–13 pt según el
@@ -2394,7 +2425,7 @@ async function generarPDFInformeAcreditacion(informeId) {
       let fPrev = null, sizePrev = null, colorPrev = null;
       try { fPrev = doc.getFont(); sizePrev = doc.getFontSize(); colorPrev = doc.getTextColor(); } catch (e) {}
       doc.addPage();
-      safe = window.dibujarLetterheadPDF(doc, titulo);
+      safe = pintarMembreteGarantizado(doc, titulo);
       y = safe.top;
       try {
         if (fPrev && fPrev.fontName) doc.setFont(fPrev.fontName, fPrev.fontStyle || "normal");
@@ -2503,6 +2534,11 @@ async function generarPDFInformeAcreditacion(informeId) {
       sistemas.forEach((s) => escribirParrafo(`•  ${s.descripcion}`, { espacioDespues: 4 }));
     }
     const total = doc.internal.getNumberOfPages();
+    // Barrido final: toda página del informe debe tener su membrete; si alguna quedó sin él, se le pone ahora.
+    for (let p = 1; p <= total; p++) {
+      doc.setPage(p);
+      if (!(doc.__membretePags && doc.__membretePags.has(p))) pintarMembreteGarantizado(doc, titulo);
+    }
     for (let p = 1; p <= total; p++) { doc.setPage(p); if (window.dibujarNumeroPaginaPDF) dibujarNumeroPaginaPDF(doc, p, total); }
     const nombreArchivo = `Informe-Acreditacion-${(informe.proyecto || "proyecto").replace(/[^a-z0-9]+/gi, "-")}-${informe.fecha || ""}.pdf`;
     let bytesFinales = new Uint8Array(doc.output("arraybuffer"));
