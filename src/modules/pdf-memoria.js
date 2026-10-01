@@ -2277,7 +2277,7 @@ function construirMemoriaCalculoPDF() {
     doc.text("Sellador de Juntas", marginL, y); y += 24;
     doc.setTextColor(20, 20, 20);
     doc.setFont("helvetica", "normal"); doc.setFontSize(MC_BODY); doc.setTextColor(80, 80, 80);
-    const introJ = "Aplica a CP 606, CFS SIL GG, CFS SP WB y FS ONE MAX (este último solo válido en Pared - Entrepiso, Panel de yeso - Concreto). El volumen de sellador (V_SELLO) para una junta con ancho medido (AN_JUNTA) se calcula con el ancho más el traslape del producto a cada lado (T_RASLP), el espesor de producto según sistema UL (E_JUNTA), la longitud (L_JUNTA), el N° de lados sellados (N_LADO) y la cantidad de juntas (CANT_JUNTA). Para juntas topadas (AN_JUNTA = 0) se usa en su lugar una fórmula de cordón mínimo específica por producto, ver nota más abajo.";
+    const introJ = "Aplica a CP 606, CFS SIL GG, CFS SP WB y FS ONE MAX (este último solo válido en Pared - Entrepiso y Pared - Pared, con Panel de yeso y Concreto). El volumen de sellador (V_SELLO) para una junta con ancho medido (AN_JUNTA) se calcula con el ancho más el traslape del producto a cada lado (T_RASLP), el espesor de producto según sistema UL (E_JUNTA), la longitud (L_JUNTA), el N° de lados sellados (N_LADO) y la cantidad de juntas (CANT_JUNTA). Para juntas topadas (AN_JUNTA = 0) se usa en su lugar una fórmula de cordón mínimo específica por producto, ver nota más abajo.";
     y = dibujarParrafoConSimbolos(doc, marginL, y, introJ, MC_BODY, anchoContenido, [
       { marcador: "V_SELLO", sim: SIM.VSELLO },
       { marcador: "AN_JUNTA", sim: SIM.ANJUNTA },
