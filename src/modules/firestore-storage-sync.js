@@ -43,6 +43,25 @@ function hashLiviano(str) {
   return String(h) + ":" + str.length;
 }
 
+// Corre fn(item, indice) sobre todos los items con a lo sumo `limite` a la vez. Las fotos se
+// subían y se bajaban de una en una: abrir un proyecto con 11 fotos livianas (~1,5 MB) tardaba
+// entre 3 y 4 segundos solo en las fotos. Con unas pocas en paralelo baja a una fracción.
+async function ejecutarConLimite(items, limite, fn) {
+  let siguiente = 0;
+  const cantidad = Math.max(1, Math.min(limite, items.length));
+  const trabajadores = [];
+  for (let w = 0; w < cantidad; w++) {
+    trabajadores.push((async () => {
+      while (true) {
+        const i = siguiente++;
+        if (i >= items.length) return;
+        await fn(items[i], i);
+      }
+    })());
+  }
+  await Promise.all(trabajadores);
+}
+
 // Sube las fotos que cambiaron desde la última vez (comparando por hash
 // contra una caché local en IndexedDB, clave por proyecto). imagenesJson es
 // el string tal cual lo devuelve extraerImagenesGrandes().
@@ -68,12 +87,12 @@ async function fsSubirImagenesFaltantes(proyectoId, imagenesJson) {
   const urls = {};
   let cacheCambio = false;
   let algunaFallo = false;
-  for (const key of claves) {
+  await ejecutarConLimite(claves, 4, async (key) => {
     const dataUrl = imagenes[key];
     const hash = hashLiviano(dataUrl);
     if (cache[key] && cache[key].hash === hash) {
       urls[key] = cache[key].url;
-      continue;
+      return;
     }
     // Cada foto en su propio try/catch — antes, si UNA foto fallaba (red
     // mala a mitad de la subida, típico en obra), la excepción tumbaba la
@@ -91,11 +110,14 @@ async function fsSubirImagenesFaltantes(proyectoId, imagenesJson) {
       algunaFallo = true;
       console.error("No se pudo subir la foto " + key + " (se reintenta después):", e);
     }
-  }
+  });
   if (cacheCambio && window.idbGuardarMetaClave) {
     try { await window.idbGuardarMetaClave(claveCache, cache); } catch (e) { /* best-effort */ }
   }
-  return { urls, algunaFallo };
+  // Mismo orden de claves que antes (las subidas terminan en cualquier orden).
+  const urlsOrdenadas = {};
+  claves.forEach((k) => { if (k in urls) urlsOrdenadas[k] = urls[k]; });
+  return { urls: urlsOrdenadas, algunaFallo };
 }
 
 // Descarga cada foto de su url y arma el mismo formato de string que
@@ -107,9 +129,10 @@ async function fsSubirImagenesFaltantes(proyectoId, imagenesJson) {
 async function fsDescargarImagenesComoJson(imagenesUrls) {
   const imagenes = {};
   const entradas = Object.entries(imagenesUrls || {});
-  for (const [key, url] of entradas) {
+  await ejecutarConLimite(entradas, 5, async ([key, url]) => {
     try {
       const respuesta = await fetch(url);
+      if (!respuesta.ok) throw new Error("HTTP " + respuesta.status);
       const blob = await respuesta.blob();
       const dataUrl = await new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -123,8 +146,12 @@ async function fsDescargarImagenesComoJson(imagenesUrls) {
       // Se deja sin esa clave — reinsertarImagenesGrandes deja el
       // placeholder "@@IMG:key" sin resolver para esa foto puntual.
     }
-  }
-  return JSON.stringify(imagenes);
+  });
+  // Las fotos terminan de bajar en cualquier orden; se devuelven en el orden original para que el
+  // resultado sea idéntico al de la descarga de una en una.
+  const ordenadas = {};
+  entradas.forEach(([key]) => { if (key in imagenes) ordenadas[key] = imagenes[key]; });
+  return JSON.stringify(ordenadas);
 }
 
 // Borra TODAS las fotos de un proyecto en Storage (carpeta

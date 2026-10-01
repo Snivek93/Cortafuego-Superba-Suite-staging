@@ -23,6 +23,26 @@ let ULTIMO_PERMITIR_CERRAR = false; // recordado para poder re-renderizar en viv
 // conexión, usando el último dato confirmado. Ver cargarEstadoOrganizacion().
 let ESPACIO_POR_PROYECTO_LOCAL = {};
 
+// Ids de proyectos que se están borrando en la nube. Mientras la limpieza sigue en segundo
+// plano, la lista no los vuelve a mostrar aunque Firestore todavía los devuelva.
+const PROYECTOS_BORRANDO = new Set();
+// Protección contra doble toque en "Proyecto nuevo" y en "Abrir archivo".
+let CREANDO_PROYECTO = false;
+let ULTIMA_APERTURA_ARCHIVO_MS = 0;
+// Los clics "fuera" que cierran los menús se registran UNA sola vez. Antes se registraba uno
+// nuevo en cada redibujo de la lista (ordenar, borrar, sincronizar...) y nunca se quitaban:
+// se acumulaban y la pantalla se iba poniendo más lenta con el uso.
+let CLICK_GLOBAL_LIGADO = false;
+function ligarClickGlobalUnaVez() {
+  if (CLICK_GLOBAL_LIGADO) return;
+  CLICK_GLOBAL_LIGADO = true;
+  document.addEventListener("click", () => {
+    const menuFab = document.getElementById("proy-fab-menu"); if (menuFab) menuFab.classList.remove("open");
+    const dropEsp = document.getElementById("proy-espacio-dropdown"); if (dropEsp) dropEsp.classList.remove("open");
+    const popupCuenta = document.getElementById("proy-account-popup"); if (popupCuenta) popupCuenta.hidden = true;
+  });
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
@@ -73,6 +93,11 @@ async function cargarEstadoOrganizacion(soloLocal) {
   try { ESPACIO_POR_PROYECTO_LOCAL = (await window.idbLeerMetaClave("espacioPorProyecto")) || {}; } catch (e) { ESPACIO_POR_PROYECTO_LOCAL = {}; }
 
   const user = window.usuarioActual ? window.usuarioActual() : null;
+  // La consulta de invitaciones sale junto con la de espacios (antes esperaba a que terminara la otra).
+  let promesaInvitaciones = null;
+  if (!soloLocal && user && user.email && window.fsListarInvitacionesPendientes) {
+    promesaInvitaciones = Promise.resolve().then(() => window.fsListarInvitacionesPendientes(user.email));
+  }
   if (!soloLocal) {
     ESPACIOS = [];
     if (user && window.fsListarMisEspacios) {
@@ -86,8 +111,8 @@ async function cargarEstadoOrganizacion(soloLocal) {
   if (ESPACIO_ACTIVO_ID && !ESPACIOS.find((e) => e.id === ESPACIO_ACTIVO_ID)) ESPACIO_ACTIVO_ID = null;
   if (!soloLocal) {
     INVITACIONES_ESPACIO = [];
-    if (user && user.email && window.fsListarInvitacionesPendientes) {
-      try { INVITACIONES_ESPACIO = await window.fsListarInvitacionesPendientes(user.email); } catch (e) { INVITACIONES_ESPACIO = []; }
+    if (promesaInvitaciones) {
+      try { INVITACIONES_ESPACIO = await promesaInvitaciones; } catch (e) { INVITACIONES_ESPACIO = []; }
     }
   }
 }
@@ -898,6 +923,7 @@ window.actualizarInvitacionesEspacioEnVivo = actualizarInvitacionesEspacioEnVivo
 // espacio, pero no se descargan hasta que se abren".
 function actualizarMetadataListadoSiHaceFalta(doc, lista) {
   const id = doc.id;
+  if (PROYECTOS_BORRANDO.has(id)) return;
   // El proyecto activamente abierto en ESTE dispositivo ahora mismo no se
   // toca acá — su propia sincronización la maneja detectarSiEsCompartido()
   // al abrirlo.
@@ -949,7 +975,30 @@ function actualizarMetadataListadoSiHaceFalta(doc, lista) {
 
 async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   ULTIMO_PERMITIR_CERRAR = permitirCerrar;
+  ligarClickGlobalUnaVez();
   const overlay = crearOverlaySiHaceFalta();
+  // Las consultas a Firestore salen TODAS A LA VEZ, antes de leer el estado local. Antes iban
+  // una detrás de otra (unos 1,3 s sumadas en una compu con buena señal; mucho más en celular).
+  // Cada una devuelve { ok, valor | error } para que un fallo se siga registrando igual que antes
+  // sin tumbar a las demás.
+  const userPre = (!soloLocal && window.usuarioActual) ? window.usuarioActual() : null;
+  let prefetch = null;
+  if (userPre) {
+    let espacioPre = null;
+    try { espacioPre = (await window.idbLeerMetaClave("espacioActivoId")) || null; } catch (e) { espacioPre = null; }
+    const intentar = (fn) => (async () => { try { return { ok: true, valor: await fn() }; } catch (e) { return { ok: false, error: e }; } })();
+    prefetch = {
+      espacioId: espacioPre,
+      conmigo: window.fsListarProyectosCompartidosConmigo ? intentar(async () => {
+        if (window.invitacionesResueltas) {
+          await Promise.race([window.invitacionesResueltas(), new Promise((r) => setTimeout(r, 4000))]);
+        }
+        return window.fsListarProyectosCompartidosConmigo(userPre.uid);
+      }) : null,
+      mios: window.fsListarMisProyectosCompartidos ? intentar(() => window.fsListarMisProyectosCompartidos(userPre.uid)) : null,
+      deEspacio: (espacioPre && window.fsListarProyectosDeEspacio) ? intentar(() => window.fsListarProyectosDeEspacio(espacioPre)) : null,
+    };
+  }
   await cargarEstadoOrganizacion(soloLocal);
 
   let lista = [];
@@ -962,6 +1011,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
     // (versión de archivo-estado-app.js desactualizada).
     lista = window.idbListarIndiceProyectos ? await window.idbListarIndiceProyectos() : await window.idbListarProyectos();
   } catch (e) { lista = []; }
+  lista = lista.filter((p) => !PROYECTOS_BORRANDO.has(p.id));
 
   const idsCompartidos = new Set();
   const candadosAjenosPorProyecto = {};
@@ -984,15 +1034,11 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
     candadosAjenosPorProyecto[doc.id] = c.nombre || "Otra persona";
   }
 
-  if (!soloLocal && user && window.fsListarProyectosCompartidosConmigo) {
+  if (!soloLocal && user && prefetch && prefetch.conmigo) {
     try {
-      if (window.invitacionesResueltas) {
-        await Promise.race([
-          window.invitacionesResueltas(),
-          new Promise((r) => setTimeout(r, 4000)),
-        ]);
-      }
-      const remotos = await window.fsListarProyectosCompartidosConmigo(user.uid);
+      const resConmigo = await prefetch.conmigo;
+      if (!resConmigo.ok) throw resConmigo.error;
+      const remotos = resConmigo.valor;
       for (const remoto of remotos) {
         idsCompartidos.add(remoto.id);
         espacioIdConocido[remoto.id] = remoto.espacioId || null;
@@ -1011,9 +1057,11 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
     }
   }
 
-  if (!soloLocal && user && window.fsListarMisProyectosCompartidos) {
+  if (!soloLocal && user && prefetch && prefetch.mios) {
     try {
-      const mios = await window.fsListarMisProyectosCompartidos(user.uid);
+      const resMios = await prefetch.mios;
+      if (!resMios.ok) throw resMios.error;
+      const mios = resMios.valor;
       for (const doc of mios) {
         registrarCandadoAjeno(doc);
         espacioIdConocido[doc.id] = doc.espacioId || null;
@@ -1028,7 +1076,16 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
 
   if (!soloLocal && ESPACIO_ACTIVO_ID && window.fsListarProyectosDeEspacio) {
     try {
-      const deEspacio = await window.fsListarProyectosDeEspacio(ESPACIO_ACTIVO_ID);
+      // Si el espacio activo es el mismo que se pidió por adelantado, se reusa esa consulta;
+      // si cambió (o no había), se pide ahora como antes.
+      let deEspacio;
+      if (prefetch && prefetch.deEspacio && prefetch.espacioId === ESPACIO_ACTIVO_ID) {
+        const resEsp = await prefetch.deEspacio;
+        if (!resEsp.ok) throw resEsp.error;
+        deEspacio = resEsp.valor;
+      } else {
+        deEspacio = await window.fsListarProyectosDeEspacio(ESPACIO_ACTIVO_ID);
+      }
       for (const doc of deEspacio) {
         espacioIdConocido[doc.id] = ESPACIO_ACTIVO_ID;
         ESPACIO_POR_PROYECTO_LOCAL[doc.id] = ESPACIO_ACTIVO_ID;
@@ -1086,16 +1143,22 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
     </div>`;
 
   const hayAlgoQueMostrar = carpetasOrdenadas.length || proyectosOrdenados.length;
+  // "Nueva carpeta" vive arriba, a la derecha, en la misma fila que A-Z / Reciente / Manual
+  // (con la lista vacía no hay selector de orden: queda sola a la derecha). En pantallas
+  // angostas el texto se acorta a "Carpeta" (ver styles.css).
+  const btnNuevaCarpeta = puedeCrearSubcarpeta
+    ? `<button type="button" class="proy-btn-nueva-carpeta proy-btn-nueva-carpeta-arriba" id="proy-btn-nueva-carpeta" aria-label="Nueva carpeta"><svg class="icon"><use href="#i-plus"/></svg><span class="proy-nc-largo">Nueva carpeta</span><span class="proy-nc-corto">Carpeta</span></button>`
+    : "";
+  const filaControles = (hayAlgoQueMostrar || btnNuevaCarpeta)
+    ? `<div class="proy-orden-fila${hayAlgoQueMostrar ? "" : " proy-orden-fila-solo-boton"}">${hayAlgoQueMostrar ? controlOrden : ""}${btnNuevaCarpeta}</div>`
+    : "";
   const seccionProyectos = hayAlgoQueMostrar
     ? `<p class="proy-section-title">${carpetaActiva ? escapeHtml(carpetaActiva.nombre) : "Tus proyectos"}</p>
-       ${controlOrden}
+       ${filaControles}
        <div class="proy-lista" id="proy-lista-principal">
          ${carpetasOrdenadas.map(c => tarjetaCarpetaHTML(c, conNombre.filter(p => CARPETA_ASIGNACIONES[p.id] === c.id).length)).join("")}
          ${proyectosOrdenados.map(p => tarjetaProyectoHTML(p.id, p.data, false, modoManual, idsCompartidos.has(p.id), candadosAjenosPorProyecto[p.id], !idsCompartidos.has(p.id), permisoEdicionConocido[p.id] === false, espacioIdConocido[p.id] || "")).join("")}
        </div>`
-    : "";
-  const btnNuevaCarpeta = puedeCrearSubcarpeta
-    ? `<button type="button" class="proy-btn-nueva-carpeta" id="proy-btn-nueva-carpeta"><svg class="icon"><use href="#i-plus"/></svg>Nueva carpeta</button>`
     : "";
   const seccionBorradores = (!CARPETA_ACTIVA_ID && borradores.length)
     ? `<p class="proy-section-title">Borradores</p><div class="proy-lista">${borradores.map(p => tarjetaProyectoHTML(p.id, p.data, true, false)).join("")}</div>`
@@ -1134,7 +1197,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
       <div class="proy-body-full-inner">
         ${breadcrumb}
         ${seccionProyectos}
-        ${btnNuevaCarpeta}
+        ${hayAlgoQueMostrar ? "" : filaControles}
         ${seccionBorradores}
         ${vacio}
       </div>
@@ -1186,32 +1249,51 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
           renderPantallaProyectos(permitirCerrar);
           return;
         }
-        try { await window.idbBorrarProyecto(id); } catch (err) { console.error("No se pudo borrar el proyecto:", err); }
-        delete CARPETA_ASIGNACIONES[id];
-        guardarAsignaciones();
-        const user = window.usuarioActual ? window.usuarioActual() : null;
-        if (user) {
-          try {
-            if (esPropio) {
-              if (window.fsBorrarProyectoDeNube) await window.fsBorrarProyectoDeNube(id);
-              if (window.fsBorrarFotosDeProyecto) await window.fsBorrarFotosDeProyecto(id);
-            } else {
-              if (window.fsQuitarAcceso) await window.fsQuitarAcceso(id, user.uid);
-            }
-          } catch (err) {
-            console.error("No se pudo borrar/quitar acceso en la nube:", err);
-            if (window.mostrarToast) mostrarToast("Se borró en este dispositivo. Revisá tu conexión: puede tardar en desaparecer de la nube.", "error");
-          }
-        }
-        if (id === window.PROYECTO_ACTIVO_ID) {
+        // Borrado optimista: la tarjeta desaparece YA y el borrado (en este dispositivo y en la nube)
+        // sigue por detrás. Antes la tarjeta esperaba a Firestore, a Storage y a que se redibujara
+        // toda la lista con sus consultas: varios segundos.
+        PROYECTOS_BORRANDO.add(id);
+        const tarjetaBorrada = btn.closest(".proy-card");
+        if (tarjetaBorrada) tarjetaBorrada.remove();
+        const eraActivo = (id === window.PROYECTO_ACTIVO_ID);
+        if (eraActivo) {
+          // Se suelta de inmediato: así ningún autoguardado ni sincronización pendiente puede
+          // volver a crear este proyecto mientras se limpia.
           window.PROYECTO_ACTIVO_ID = null;
           if (typeof ROWS !== "undefined") {
             ROWS = []; ROWS_J = []; MANUAL_ITEMS = []; PLANOS = []; INFORMES_ACREDITACION = [];
           }
-          renderPantallaProyectos(false);
-        } else {
-          renderPantallaProyectos(permitirCerrar);
         }
+        try { await window.idbBorrarProyecto(id); } catch (err) { console.error("No se pudo borrar el proyecto:", err); }
+        delete CARPETA_ASIGNACIONES[id];
+        guardarAsignaciones();
+        const user = window.usuarioActual ? window.usuarioActual() : null;
+        const terminarLimpieza = () => {
+          PROYECTOS_BORRANDO.delete(id);
+          const ov = document.getElementById("pantalla-proyectos");
+          if (ov && !ov.hidden) renderPantallaProyectos(ULTIMO_PERMITIR_CERRAR);
+        };
+        if (user) {
+          // En segundo plano: no se espera.
+          (async () => {
+            try {
+              if (esPropio) {
+                if (window.fsBorrarProyectoDeNube) await window.fsBorrarProyectoDeNube(id);
+                if (window.fsBorrarFotosDeProyecto) await window.fsBorrarFotosDeProyecto(id);
+              } else {
+                if (window.fsQuitarAcceso) await window.fsQuitarAcceso(id, user.uid);
+              }
+            } catch (err) {
+              console.error("No se pudo borrar/quitar acceso en la nube:", err);
+              if (window.mostrarToast) mostrarToast("Se borró en este dispositivo. Revisá tu conexión: puede tardar en desaparecer de la nube.", "error");
+            }
+            terminarLimpieza();
+          })();
+        } else {
+          terminarLimpieza();
+        }
+        // Si era el proyecto abierto, la pantalla pasa a la lista sin botón de volver.
+        if (eraActivo) renderPantallaProyectos(false);
       };
       const mensaje = esCarpeta
         ? "¿Borrar esta carpeta? Los proyectos y subcarpetas que tenga adentro NO se borran, vuelven a la lista general."
@@ -1282,16 +1364,23 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
       proyFabMenu.classList.toggle("open");
     });
     proyFabMenu.addEventListener("click", (e) => e.stopPropagation());
-    document.addEventListener("click", () => proyFabMenu.classList.remove("open"));
     const btnFabNuevo = document.getElementById("proy-fab-menu-nuevo");
     if (btnFabNuevo) btnFabNuevo.addEventListener("click", async () => {
       proyFabMenu.classList.remove("open");
-      const nuevoId = await window.crearYAbrirProyectoNuevo();
-      if (CARPETA_ACTIVA_ID && nuevoId) {
-        CARPETA_ASIGNACIONES[nuevoId] = CARPETA_ACTIVA_ID;
-        guardarAsignaciones();
+      // Doble toque: si ya se está creando uno, el segundo toque no crea otro (antes salían dos
+      // proyectos vacíos idénticos en Borradores).
+      if (CREANDO_PROYECTO) return;
+      CREANDO_PROYECTO = true;
+      try {
+        const nuevoId = await window.crearYAbrirProyectoNuevo();
+        if (CARPETA_ACTIVA_ID && nuevoId) {
+          CARPETA_ASIGNACIONES[nuevoId] = CARPETA_ACTIVA_ID;
+          guardarAsignaciones();
+        }
+        ocultarPantallaProyectos();
+      } finally {
+        CREANDO_PROYECTO = false;
       }
-      ocultarPantallaProyectos();
     });
     const btnFabAbrir = document.getElementById("proy-fab-menu-abrir");
     if (btnFabAbrir && proyFabInput) {
@@ -1303,6 +1392,10 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
         const file = e.target.files[0];
         e.target.value = "";
         if (!file) return;
+        // Dos aperturas casi seguidas (doble toque) no importan el archivo dos veces.
+        const ahoraMs = Date.now();
+        if (ahoraMs - ULTIMA_APERTURA_ARCHIVO_MS < 2500) return;
+        ULTIMA_APERTURA_ARCHIVO_MS = ahoraMs;
         if (window.importarProyectoJSON) window.importarProyectoJSON(file);
         ocultarPantallaProyectos();
       });
@@ -1324,7 +1417,6 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
       }
     });
     dropdownEspacio.addEventListener("click", (e) => e.stopPropagation());
-    document.addEventListener("click", () => { dropdownEspacio.classList.remove("open"); });
     dropdownEspacio.querySelectorAll("[data-espacio-id]").forEach((btnItem) => {
       btnItem.addEventListener("click", () => {
         const nuevoId = btnItem.getAttribute("data-espacio-id") || null;
@@ -1400,7 +1492,6 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
       popup.hidden = !popup.hidden;
     });
     popup.addEventListener("click", (e) => e.stopPropagation());
-    document.addEventListener("click", () => { popup.hidden = true; });
     conectarBotonesPopup(popup);
   }
 }

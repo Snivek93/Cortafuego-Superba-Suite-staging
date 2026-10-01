@@ -190,9 +190,15 @@ async function importarProyectoJSON(file) {
       return;
     }
 
-    const guardarComoProyecto = async (idAUsar) => {
+    const guardarComoProyecto = async (idAUsar, esCopia) => {
       try {
-        await window.idbGuardarProyecto(idAUsar, Object.assign({}, data, { id: idAUsar }));
+        const datosAGuardar = Object.assign({}, data, { id: idAUsar });
+        if (esCopia) {
+          // Una copia lleva su propio nombre para no quedar idéntica al original en la lista.
+          const piOriginal = data.projectInfo || {};
+          datosAGuardar.projectInfo = Object.assign({}, piOriginal, { nombre: "Copia de " + (piOriginal.nombre || "proyecto") });
+        }
+        await window.idbGuardarProyecto(idAUsar, datosAGuardar);
         await window.abrirProyectoExistente(idAUsar);
         mostrarToast(`Proyecto importado: ${data.filas.length} fila(s).`);
       } catch (e) {
@@ -200,26 +206,48 @@ async function importarProyectoJSON(file) {
       }
     };
 
+    // Se usa el índice liviano (nombre/cliente/fecha) en vez de leer TODOS los proyectos completos
+    // con sus fotos solo para comparar: importar era más lento por eso.
     let existentes = [];
-    try { existentes = await window.idbListarProyectos(); } catch (e) { existentes = []; }
+    try {
+      existentes = window.idbListarIndiceProyectos ? await window.idbListarIndiceProyectos() : await window.idbListarProyectos();
+    } catch (e) { existentes = []; }
     const yaExiste = data.id && existentes.some(p => p.id === data.id);
+    // Archivos SIN id (los .fss armados a mano, o exportes viejos) no se podían reconocer:
+    // cada importación creaba un proyecto nuevo sin avisar, y así se acumulaban duplicados.
+    // Ahora, si el archivo no trae id, también se compara por nombre + cliente. (Un archivo con id
+    // propio y distinto, aunque tenga el mismo nombre, sigue entrando directo: suele ser un proyecto
+    // legítimo que viene de otro dispositivo.)
+    const norm = (x) => String(x || "").trim().toLowerCase();
+    const nombreArchivo = norm(data.projectInfo && data.projectInfo.nombre);
+    const clienteArchivo = norm(data.projectInfo && data.projectInfo.cliente);
+    const parecido = (!yaExiste && !data.id && nombreArchivo)
+      ? existentes.find(p => {
+          const pi = (p.data && p.data.projectInfo) || {};
+          return norm(pi.nombre) === nombreArchivo && norm(pi.cliente) === clienteArchivo;
+        })
+      : null;
 
-    if (!yaExiste) {
+    if (!yaExiste && !parecido) {
       const id = data.id || ("p_" + Date.now().toString(36) + "_importado");
       await guardarComoProyecto(id);
       return;
     }
 
-    pedirEleccion("Ya tenés un proyecto guardado de este mismo archivo. ¿Qué querés hacer?", [
+    const idExistente = yaExiste ? data.id : parecido.id;
+    const textoPregunta = yaExiste
+      ? "Ya tenés un proyecto guardado de este mismo archivo. ¿Qué querés hacer?"
+      : "Ya tenés un proyecto con el mismo nombre y cliente. ¿Qué querés hacer?";
+    pedirEleccion(textoPregunta, [
       { label: "Reemplazar", act: "reemplazar", clase: "danger" },
       { label: "Guardar como copia", act: "copia", clase: "primary" },
       { label: "Cancelar", act: "cancelar", clase: "secondary" },
     ], async (eleccion) => {
       if (eleccion === "reemplazar") {
-        await guardarComoProyecto(data.id);
+        await guardarComoProyecto(idExistente);
       } else if (eleccion === "copia") {
         const nuevoId = "p_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
-        await guardarComoProyecto(nuevoId);
+        await guardarComoProyecto(nuevoId, true);
       }
     });
   };
