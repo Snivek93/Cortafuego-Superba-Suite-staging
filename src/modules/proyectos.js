@@ -213,11 +213,16 @@ async function obtenerSnapshotNube(user) {
 }
 function guardarSnapshotNube(user, d) {
   const docs = {};
+  // Proyectos que solo existen en la nube (este dispositivo nunca los abrió): entran a la lista únicamente con la
+  // ronda remota. Sin guardarlos, al moverse entre carpetas (que no pide nada a la red) desaparecían de la vista.
+  const sinDescargar = (d.lista || []).filter((p) => p && p.data && p.data._sinDescargar).map((p) => ({
+    id: p.id, nombre: (p.data.projectInfo && p.data.projectInfo.nombre) || "", cliente: (p.data.projectInfo && p.data.projectInfo.cliente) || "", guardadoEn: p.data.guardadoEn || null,
+  }));
   Object.keys(d.docs).forEach((id) => {
     const x = d.docs[id] || {};
     docs[id] = { id, ownerId: x.ownerId || null, espacioId: x.espacioId || null, editoresUids: Array.isArray(x.editoresUids) ? x.editoresUids.slice() : [], eliminadoEn: marcaDeTiempoMs(x.eliminadoEn) || null, nombre: x.nombre || "" };
   });
-  const base = { clave: claveSnapNube(user), docs, enNube: Array.from(d.enNube), permisos: Object.assign({}, d.permisos), candados: Object.assign({}, d.candados), nubeCompleta: !!d.nubeCompleta };
+  const base = { clave: claveSnapNube(user), docs, enNube: Array.from(d.enNube), permisos: Object.assign({}, d.permisos), candados: Object.assign({}, d.candados), nubeCompleta: !!d.nubeCompleta, sinDescargar };
   SNAP_NUBE = Object.assign({ ts: Date.now() }, base);
   const firma = JSON.stringify(base);
   // Se guarda en el dispositivo solo si cambió (o si la copia ya tiene más de 5 min): así no se escribe en cada redibujo.
@@ -1898,6 +1903,12 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
       Object.assign(permisoEdicionConocido, snap.permisos || {});
       if (edad < SNAP_CANDADO_MS) Object.assign(candadosAjenosPorProyecto, snap.candados || {});
       if (snap.nubeCompleta && edad < SNAP_CONFIABLE_MS) nubeCompleta = true;
+      // Proyectos solo-en-la-nube: se reponen en la lista (si este dispositivo ya los tiene, no se duplican).
+      (snap.sinDescargar || []).forEach((e) => {
+        if (!e || !e.id || PROYECTOS_BORRANDO.has(e.id) || window.PROYECTO_ACTIVO_ID === e.id) return;
+        if (lista.some((p) => p.id === e.id)) return;
+        lista.push({ id: e.id, data: { projectInfo: { nombre: e.nombre, cliente: e.cliente }, guardadoEn: e.guardadoEn, creadoEn: e.guardadoEn, _sinDescargar: true } });
+      });
       hidratado = true;
     }
   }
@@ -1983,7 +1994,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   if (!soloLocal) guardarEspacioPorProyectoLocal();
   if (!soloLocal) {
     REMOTO_COMPLETADO = true;
-    if (user) guardarSnapshotNube(user, { docs: docsRemotos, enNube: idsEnNube, permisos: permisoEdicionConocido, candados: candadosAjenosPorProyecto, nubeCompleta });
+    if (user) guardarSnapshotNube(user, { docs: docsRemotos, enNube: idsEnNube, permisos: permisoEdicionConocido, candados: candadosAjenosPorProyecto, nubeCompleta, lista });
     programarPrecargaMiembros();
   }
 
