@@ -776,6 +776,17 @@ async function detectarSiEsCompartido(id) {
   try {
     let remoto = await window.fsDescargarUltimaVersion(id);
     if (PROYECTO_ACTIVO_ID !== id) return;
+    // Si este dispositivo YA había sincronizado este proyecto con la nube y ahora no existe allá, otra persona
+    // lo borró (o ya no tengo acceso). Antes se volvía a CREAR a nombre de quien lo abriera: así reaparecían
+    // proyectos borrados. Ahora se abre en solo lectura y se ofrece una copia editable.
+    if (!remoto) {
+      let sincronizadoAntes = null;
+      try { sincronizadoAntes = await idbLeerMetaClave(claveVersionLocal(id)); } catch (e2) {}
+      if (sincronizadoAntes !== null && sincronizadoAntes !== undefined) {
+        aplicarModoSoloLectura(true, null, "eliminado");
+        return;
+      }
+    }
     if (!remoto && window.fsAsegurarProyecto) {
       try {
         await window.fsAsegurarProyecto(id, {
@@ -863,7 +874,9 @@ function aplicarModoSoloLectura(activo, ocupadoPor, motivo) {
   if (texto && PROYECTO_ACTIVO_SOLO_LECTURA) {
     texto.textContent = motivo === "permiso"
       ? "Solo lectura — no tenés permiso de edición en este espacio"
-      : `Solo lectura — ${ocupadoPor || "otra persona"} está editando`;
+      : motivo === "eliminado"
+        ? "Solo lectura — este proyecto ya no está en la nube (lo eliminó otra persona)"
+        : `Solo lectura — ${ocupadoPor || "otra persona"} está editando`;
   }
   // Botón "Hacer copia editable": solo tiene sentido cuando el motivo es
   // falta de permiso (permanente) — si es candado ajeno (temporal), el
@@ -871,7 +884,7 @@ function aplicarModoSoloLectura(activo, ocupadoPor, motivo) {
   // ofrecer una copia aparte para eso.
   if (banner) {
     let btnCopia = document.getElementById("btn-solo-lectura-copia");
-    if (PROYECTO_ACTIVO_SOLO_LECTURA && motivo === "permiso") {
+    if (PROYECTO_ACTIVO_SOLO_LECTURA && (motivo === "permiso" || motivo === "eliminado")) {
       if (!btnCopia) {
         btnCopia = document.createElement("button");
         btnCopia.type = "button";
@@ -1379,6 +1392,7 @@ window.UNDO_STACK = UNDO_STACK;
 window.pushUndo = pushUndo;
 window.deshacerCambio = deshacerCambio;
 window.idbListarProyectos = idbListarProyectos;
+window.idbLeerProyecto = idbLeerProyecto;
 window.idbGuardarProyecto = idbGuardarProyecto;
 window.idbBorrarProyecto = idbBorrarProyecto;
 window.idbLeerActivo = idbLeerActivo;

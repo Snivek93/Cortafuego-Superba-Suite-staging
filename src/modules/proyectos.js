@@ -271,7 +271,8 @@ function chipsProyectoHTML(id, ctx) {
   if (hayOtros) chips.push('<span class="proy-chip ok">' + icoPx("users") + 'Compartido</span>');
   if (p.doc && !p.puedeEditar) chips.push('<span class="proy-chip info">' + icoPx("eye") + 'Solo lectura</span>');
   if (ctx.candados[id]) chips.push('<span class="proy-chip warn">' + icoPx("lock") + escapeHtml(ctx.candados[id]) + ' está editando</span>');
-  if (ctx.user && ctx.nubeCompleta && !ctx.enNube.has(id)) chips.push('<span class="proy-chip neutro">' + icoPx("cloud-off") + 'Solo en este teléfono</span>');
+  if (ctx.zombis && ctx.zombis.has(id)) chips.push('<span class="proy-chip warn">' + icoPx("cloud-off") + 'Ya no está en la nube</span>');
+  else if (ctx.user && ctx.nubeCompleta && !ctx.enNube.has(id) && !(ctx.sincronizados && ctx.sincronizados.has(id))) chips.push('<span class="proy-chip neutro">' + icoPx("cloud-off") + 'Solo en este teléfono</span>');
   return chips.length ? '<div class="proy-chips">' + chips.join("") + '</div>' : "";
 }
 
@@ -494,7 +495,7 @@ async function cargarCarpetasDelContexto(soloLocal, prefetch) {
   const nuevo = contextoCarpetas();
   const cambioCtx = nuevo.clave !== CTX_CARPETAS.clave;
   CTX_CARPETAS = nuevo;
-  if (cambioCtx) CARPETAS_FIRMA_REMOTA = "";
+  if (cambioCtx) { CARPETAS_FIRMA_REMOTA = ""; PAPELERA = []; }
   if (cambioCtx || ESCRITURAS_CARPETAS_EN_CURSO === 0) {
     let cache = null;
     try { cache = await window.idbLeerMetaClave("carpetasCtx:" + CTX_CARPETAS.clave); } catch (e) { cache = null; }
@@ -611,6 +612,295 @@ function subirCarpetasLegacy() {
   if (!Object.keys(cambios).length) return;
   guardarCacheCarpetas();
   sincronizarCarpetas(cambios);
+}
+
+// ============================================================================
+// Papelera y renombrado (fase 3)
+// ----------------------------------------------------------------------------
+// Eliminar un proyecto que está en la nube NO lo borra: lo manda a la papelera (campos eliminadoEn,
+// eliminadoPor y eliminadoPorNombre en el documento liviano). Desaparece de la lista de todas las personas
+// y se puede restaurar durante 30 días. Pasado ese plazo —o con "Eliminar definitivamente"— se borra de
+// verdad (documentos y fotos). Pueden mandar a la papelera y restaurar: la persona dueña del proyecto, quien
+// tiene permiso de edición y la dueña del espacio. Pueden borrar definitivamente: la dueña del proyecto y la
+// dueña del espacio (las reglas de Firestore lo exigen).
+// ============================================================================
+const DIAS_PAPELERA = 30;
+let PAPELERA = [];
+const PURGANDO = new Set();
+const PURGA_FALLIDA = new Set();
+function marcaDeTiempoMs(v) {
+  if (!v) return 0;
+  if (typeof v.toMillis === "function") return v.toMillis();
+  const t = new Date(v).getTime();
+  return isNaN(t) ? 0 : t;
+}
+function diasDesde(ms) { return Math.floor((Date.now() - ms) / 86400000); }
+function esErrorDePermiso(err) { return !!err && (err.code === "permission-denied" || /permission|insufficient/i.test(String(err.message || ""))); }
+function dbProyecto(id) { return firebase.firestore().collection("proyectos").doc(id); }
+async function enviarAPapelera(id) {
+  const user = usuarioCarpetas();
+  await dbProyecto(id).update({
+    eliminadoEn: firebase.firestore.FieldValue.serverTimestamp(),
+    eliminadoPor: user ? user.uid : "",
+    eliminadoPorNombre: user ? (user.displayName || user.email || "") : "",
+  });
+}
+async function restaurarDePapelera(id) {
+  const borrar = firebase.firestore.FieldValue.delete;
+  await dbProyecto(id).update({ eliminadoEn: borrar(), eliminadoPor: borrar(), eliminadoPorNombre: borrar() });
+}
+// Borra de verdad: primero se anotan las claves de las fotos (están en el documento pesado), luego se
+// borran los documentos y por último las fotos de Storage (que no se pueden listar, solo borrar por clave).
+async function purgarProyectoDeNube(id) {
+  let claves = [];
+  try {
+    const v = window.fsDescargarUltimaVersion ? await window.fsDescargarUltimaVersion(id) : null;
+    claves = Object.keys((v && v.imagenesUrls) || {});
+  } catch (e) { claves = []; }
+  await window.fsBorrarProyectoDeNube(id);
+  if (window.fsBorrarFotosDeProyecto) await window.fsBorrarFotosDeProyecto(id, claves);
+}
+function purgarEnSegundoPlano(ids) {
+  const pendientes = ids.filter((id) => !PURGANDO.has(id) && !PURGA_FALLIDA.has(id));
+  if (!pendientes.length) return;
+  pendientes.forEach((id) => PURGANDO.add(id));
+  (async () => {
+    for (const id of pendientes) {
+      try { await purgarProyectoDeNube(id); }
+      catch (e) { PURGA_FALLIDA.add(id); console.error("No se pudo borrar definitivamente " + id, e); }
+      finally { PURGANDO.delete(id); }
+    }
+    programarRefrescoCarpetas(300);
+  })();
+}
+
+async function versionLocalSincronizada(id) {
+  try { const v = await window.idbLeerMetaClave("fsVersionLocal:" + id); return (v === undefined) ? null : v; } catch (e) { return null; }
+}
+// Cambia el nombre también DENTRO del contenido del proyecto en la nube: si solo se cambiara el campo
+// liviano, el siguiente autoguardado de cualquier dispositivo lo volvería a pisar con el nombre viejo.
+async function renombrarProyectoEnNube(id, nuevoNombre) {
+  const d = firebase.firestore();
+  const user = usuarioCarpetas();
+  const ref = d.collection("proyectos").doc(id);
+  const contRef = ref.collection("contenido").doc("data");
+  return d.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return { ok: false, motivo: "no-existe" };
+    const dato = snap.data();
+    if (dato.candado && dato.candado.uid && user && dato.candado.uid !== user.uid && !(window.candadoEstaVencido && window.candadoEstaVencido(dato.candado))) {
+      return { ok: false, motivo: "candado", por: dato.candado.nombre || "otra persona" };
+    }
+    const embebido = Object.prototype.hasOwnProperty.call(dato, "payloadJson");
+    const contSnap = embebido ? null : await tx.get(contRef);
+    const payloadViejo = embebido ? dato.payloadJson : (contSnap && contSnap.exists ? contSnap.data().payloadJson : null);
+    const versionAntes = dato.versionSync || 0;
+    const versionNueva = versionAntes + 1;
+    let payloadNuevo = payloadViejo;
+    if (payloadViejo) {
+      const obj = JSON.parse(payloadViejo);
+      obj.projectInfo = Object.assign({}, obj.projectInfo, { nombre: nuevoNombre });
+      payloadNuevo = JSON.stringify(obj);
+    }
+    const ahora = firebase.firestore.FieldValue.serverTimestamp();
+    if (embebido) {
+      tx.update(ref, { nombre: nuevoNombre, payloadJson: payloadNuevo, versionSync: versionNueva, actualizadoEn: ahora });
+    } else {
+      if (payloadNuevo) tx.update(contRef, { payloadJson: payloadNuevo, versionSync: versionNueva });
+      tx.update(ref, { nombre: nuevoNombre, versionSync: versionNueva, actualizadoEn: ahora });
+    }
+    return { ok: true, versionAntes, versionNueva };
+  });
+}
+async function renombrarProyectoLocal(id, nuevoNombre) {
+  if (!window.idbLeerProyecto) return false;
+  let data = null;
+  try { data = await window.idbLeerProyecto(id); } catch (e) { data = null; }
+  if (!data) return false;
+  data.projectInfo = Object.assign({}, data.projectInfo, { nombre: nuevoNombre });
+  data.guardadoEn = new Date().toISOString();
+  await window.idbGuardarProyecto(id, data);
+  if (id === window.PROYECTO_ACTIVO_ID && typeof PROJECT_INFO !== "undefined" && PROJECT_INFO) PROJECT_INFO.nombre = nuevoNombre;
+  return true;
+}
+async function ejecutarRenombrarProyecto(id, nuevoNombre, deNube) {
+  let remoto = null;
+  if (deNube) {
+    if (!navigator.onLine || !firestoreDisponibleCarpetas()) return { ok: false, motivo: "sin-conexion" };
+    try { remoto = await renombrarProyectoEnNube(id, nuevoNombre); }
+    catch (e) {
+      console.error("No se pudo renombrar el proyecto en la nube", e);
+      return { ok: false, motivo: esErrorDePermiso(e) ? "permiso" : "error" };
+    }
+    if (!remoto.ok) return remoto;
+  }
+  const local = await renombrarProyectoLocal(id, nuevoNombre);
+  if (remoto && remoto.ok) {
+    // Este dispositivo ya tiene el nombre nuevo: se anota la versión nueva para que no lo tome por un cambio ajeno.
+    const vLocal = await versionLocalSincronizada(id);
+    if (vLocal !== null && vLocal === remoto.versionAntes) { try { await window.idbGuardarMetaClave("fsVersionLocal:" + id, remoto.versionNueva); } catch (e) {} }
+    if (id === window.PROYECTO_ACTIVO_ID && typeof PROYECTO_ACTIVO_FS_VERSION !== "undefined" && PROYECTO_ACTIVO_FS_VERSION === remoto.versionAntes) PROYECTO_ACTIVO_FS_VERSION = remoto.versionNueva;
+  }
+  return { ok: true, local };
+}
+function abrirModalRenombrarProyecto(id, nombreActual, deNube) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <p style="font-weight:600;margin:0 0 12px;">Renombrar proyecto</p>
+      <input type="text" id="proy-renombrar-proyecto-nombre" value="${escapeHtml(nombreActual)}" style="width:100%;box-sizing:border-box;height:40px;padding:0 12px;border:1px solid var(--border);border-radius:8px;font-size:var(--fs-md);background:var(--surface-raised);color:var(--ink);margin-bottom:14px;" />
+      <div class="modal-actions">
+        <button class="secondary" data-act="cancel">Cancelar</button>
+        <button class="primary" data-act="guardar">Guardar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const input = document.getElementById("proy-renombrar-proyecto-nombre");
+  const btnGuardar = overlay.querySelector('[data-act="guardar"]');
+  input.focus(); input.select();
+  let guardando = false;
+  const guardar = async () => {
+    const nombre = input.value.trim();
+    if (guardando || !nombre) return;
+    if (nombre === nombreActual) { overlay.remove(); return; }
+    guardando = true; btnGuardar.disabled = true; btnGuardar.textContent = "Guardando…";
+    const r = await ejecutarRenombrarProyecto(id, nombre, deNube);
+    if (!r.ok) {
+      guardando = false; btnGuardar.disabled = false; btnGuardar.textContent = "Guardar";
+      const msg = r.motivo === "candado" ? (r.por + " está editando este proyecto. Intentá de nuevo cuando termine.")
+        : r.motivo === "sin-conexion" ? "Para renombrar un proyecto compartido necesitás conexión."
+        : r.motivo === "permiso" ? "No tenés permiso para renombrar este proyecto."
+        : r.motivo === "no-existe" ? "Este proyecto ya no está en la nube."
+        : "No se pudo renombrar. Intentá de nuevo.";
+      if (window.mostrarToast) mostrarToast(msg, "error");
+      return;
+    }
+    overlay.remove();
+    if (window.mostrarToast) mostrarToast("Proyecto renombrado.");
+    renderPantallaProyectos(ULTIMO_PERMITIR_CERRAR, false);
+  };
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") guardar(); });
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.dataset.act === "cancel") { if (!guardando) overlay.remove(); return; }
+    if (e.target.dataset.act === "guardar") guardar();
+  });
+}
+
+// Manda a la papelera un proyecto que está en la nube (para todas las personas que lo comparten).
+function moverAPapelera(id) {
+  const mensaje = "¿Mover este proyecto a la papelera? Desaparece para todas las personas que lo comparten. Se puede restaurar durante " + DIAS_PAPELERA + " días.";
+  const hacer = async () => {
+    const user = usuarioCarpetas();
+    if (!user || !navigator.onLine || !firestoreDisponibleCarpetas()) {
+      if (window.mostrarToast) mostrarToast("Para eliminar un proyecto compartido necesitás conexión.", "error");
+      return;
+    }
+    PROYECTOS_BORRANDO.add(id);
+    document.querySelectorAll('#pantalla-proyectos .proy-card[data-id="' + id.replace(/"/g, "") + '"]').forEach((el) => el.remove());
+    try {
+      await enviarAPapelera(id);
+    } catch (err) {
+      PROYECTOS_BORRANDO.delete(id);
+      console.error("No se pudo mover el proyecto a la papelera", err);
+      if (window.mostrarToast) {
+        mostrarToast(esErrorDePermiso(err)
+          ? "No se pudo eliminar: no tenés permiso, o alguien lo está editando ahora mismo."
+          : "No se pudo eliminar el proyecto. Revisá tu conexión.", "error");
+      }
+      renderPantallaProyectos(ULTIMO_PERMITIR_CERRAR, false);
+      return;
+    }
+    const eraActivo = (id === window.PROYECTO_ACTIVO_ID);
+    if (eraActivo) {
+      window.PROYECTO_ACTIVO_ID = null;
+      if (typeof ROWS !== "undefined") { ROWS = []; ROWS_J = []; MANUAL_ITEMS = []; PLANOS = []; INFORMES_ACREDITACION = []; }
+    }
+    // La copia de este dispositivo ya no hace falta (al restaurar se vuelve a bajar de la nube).
+    try { await window.idbBorrarProyecto(id); } catch (err) { console.error("No se pudo borrar la copia local:", err); }
+    try { await window.idbGuardarMetaClave("fsVersionLocal:" + id, null); } catch (err) {}
+    accionMoverProyecto(id, null);
+    PROYECTOS_BORRANDO.delete(id);
+    if (window.mostrarToast) mostrarToast("Proyecto movido a la papelera. Podés restaurarlo durante " + DIAS_PAPELERA + " días.");
+    renderPantallaProyectos(eraActivo ? false : ULTIMO_PERMITIR_CERRAR, false);
+  };
+  if (window.pedirConfirmacion) pedirConfirmacion(mensaje, hacer);
+  else if (confirm(mensaje)) hacer();
+}
+
+function abrirModalPapelera() {
+  const user = usuarioCarpetas();
+  const items = PAPELERA.filter((i) => i.puedeRestaurar || i.puedePurgar).sort((a, b) => b.eliminadoMs - a.eliminadoMs);
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  const fila = (i) => {
+    const dias = diasDesde(i.eliminadoMs);
+    const quedan = Math.max(0, DIAS_PAPELERA - dias);
+    const quien = (user && i.porUid === user.uid) ? "vos" : (i.por || "otra persona");
+    const cuando = dias <= 0 ? "hoy" : (dias === 1 ? "ayer" : "hace " + dias + " días");
+    return `<div data-fila="${escapeHtml(i.id)}" style="padding:10px 0;border-top:1px solid var(--border);">
+      <div style="font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(i.nombre)}</div>
+      <div style="font-size:var(--fs-xs);color:var(--text-muted);margin:2px 0 8px;">Eliminado por ${escapeHtml(quien)} · ${cuando} · se borra definitivamente en ${quedan} ${quedan === 1 ? "día" : "días"}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        ${i.puedeRestaurar ? `<button class="secondary" data-act="restaurar" data-id="${escapeHtml(i.id)}">Restaurar</button>` : ""}
+        ${i.puedePurgar ? `<button class="secondary" data-act="purgar" data-id="${escapeHtml(i.id)}" style="color:var(--peligro-t);">Eliminar definitivamente</button>` : ""}
+      </div></div>`;
+  };
+  const hayPurgables = items.some((i) => i.puedePurgar);
+  overlay.innerHTML = `
+    <div class="modal-box" style="max-width:440px;width:calc(100% - 32px);">
+      <p style="font-weight:600;margin:0 0 4px;">Papelera</p>
+      <p style="margin:0 0 10px;font-size:var(--fs-xs);color:var(--text-muted);">Los proyectos eliminados se borran definitivamente a los ${DIAS_PAPELERA} días.</p>
+      <div id="proy-papelera-lista" style="max-height:55vh;overflow:auto;">${items.map(fila).join("")}</div>
+      <div class="modal-actions" style="margin-top:12px;">
+        ${hayPurgables ? '<button class="secondary" data-act="vaciar" style="color:var(--peligro-t);">Vaciar papelera</button>' : ""}
+        <button class="primary" data-act="cerrar">Cerrar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const quitarFila = (id) => {
+    PAPELERA = PAPELERA.filter((x) => x.id !== id);
+    const f = overlay.querySelector('[data-fila="' + id.replace(/"/g, "") + '"]'); if (f) f.remove();
+    if (!overlay.querySelector("[data-fila]")) overlay.remove();
+  };
+  const avisoError = (txt) => { if (window.mostrarToast) mostrarToast(txt, "error"); };
+  overlay.addEventListener("click", async (e) => {
+    if (e.target === overlay || e.target.dataset.act === "cerrar") { overlay.remove(); return; }
+    const act = e.target.dataset.act, id = e.target.dataset.id;
+    if (!act) return;
+    if (act === "restaurar") {
+      e.target.disabled = true;
+      try {
+        await restaurarDePapelera(id);
+        quitarFila(id);
+        if (window.mostrarToast) mostrarToast("Proyecto restaurado.");
+        renderPantallaProyectos(ULTIMO_PERMITIR_CERRAR, false);
+      } catch (err) {
+        console.error("No se pudo restaurar", err); e.target.disabled = false;
+        avisoError(esErrorDePermiso(err) ? "No se pudo restaurar: no tenés permiso, o alguien lo está editando." : "No se pudo restaurar. Revisá tu conexión.");
+      }
+    } else if (act === "purgar") {
+      const hacer = async () => {
+        e.target.disabled = true;
+        try { await purgarProyectoDeNube(id); quitarFila(id); renderPantallaProyectos(ULTIMO_PERMITIR_CERRAR, false); }
+        catch (err) { console.error("No se pudo borrar definitivamente", err); e.target.disabled = false; avisoError("No se pudo borrar definitivamente. Revisá tu conexión o tus permisos."); }
+      };
+      const msg = "¿Eliminar definitivamente este proyecto? No se puede deshacer.";
+      if (window.pedirConfirmacion) pedirConfirmacion(msg, hacer); else if (confirm(msg)) hacer();
+    } else if (act === "vaciar") {
+      const hacer = async () => {
+        const ids = items.filter((i) => i.puedePurgar).map((i) => i.id);
+        e.target.disabled = true;
+        let fallaron = 0;
+        for (const id2 of ids) { try { await purgarProyectoDeNube(id2); quitarFila(id2); } catch (err) { fallaron++; console.error("No se pudo borrar " + id2, err); } }
+        if (fallaron) avisoError("No se pudieron borrar " + fallaron + " proyecto(s). Revisá tu conexión o tus permisos.");
+        else if (window.mostrarToast) mostrarToast("Papelera vaciada.");
+        renderPantallaProyectos(ULTIMO_PERMITIR_CERRAR, false);
+      };
+      const msg = "¿Vaciar la papelera? Se borran definitivamente los proyectos que tenés permiso de eliminar. No se puede deshacer.";
+      if (window.pedirConfirmacion) pedirConfirmacion(msg, hacer); else if (confirm(msg)) hacer();
+    }
+  });
 }
 
 function ordenarProyectos(lista, modo, carpetaId) {
@@ -1312,7 +1602,7 @@ function actualizarMetadataListadoSiHaceFalta(doc, lista) {
 
 // Borra un proyecto o una carpeta. Para proyectos el borrado es optimista: la tarjeta desaparece YA y
 // la limpieza (este dispositivo y la nube) sigue por detrás.
-function borrarProyectoOCarpeta(id, esCarpeta, esPropio) {
+function borrarProyectoOCarpeta(id, esCarpeta, esPropio, modo) {
   const hacerBorrado = async () => {
     if (esCarpeta) {
       const carpeta = CARPETAS.find((c) => c.id === id);
@@ -1344,7 +1634,7 @@ function borrarProyectoOCarpeta(id, esCarpeta, esPropio) {
       const ov = document.getElementById("pantalla-proyectos");
       if (ov && !ov.hidden) renderPantallaProyectos(ULTIMO_PERMITIR_CERRAR);
     };
-    if (user) {
+    if (user && modo !== "local" && modo !== "zombi") {
       (async () => {
         try {
           if (window.fsBorrarProyectoDeNube) await window.fsBorrarProyectoDeNube(id);
@@ -1362,7 +1652,9 @@ function borrarProyectoOCarpeta(id, esCarpeta, esPropio) {
   };
   const mensaje = esCarpeta
     ? "¿Borrar esta carpeta? Los proyectos y subcarpetas que tenga adentro NO se borran, vuelven a la lista general."
-    : "¿Borrar este proyecto? Se borra también de la nube y de todos tus dispositivos. No se puede deshacer.";
+    : (modo === "zombi" ? "¿Quitar este proyecto de este teléfono? Ya no está en la nube, así que no se puede recuperar desde otro lado."
+      : modo === "local" ? "¿Borrar este proyecto? Solo existe en este teléfono (no está en la nube). No se puede deshacer."
+      : "¿Borrar este proyecto? Se borra también de la nube y de todos tus dispositivos. No se puede deshacer.");
   if (window.pedirConfirmacion) pedirConfirmacion(mensaje, hacerBorrado);
   else if (confirm(mensaje)) hacerBorrado();
 }
@@ -1446,6 +1738,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
       const remotos = resConmigo.valor;
       for (const remoto of remotos) {
         docsRemotos[remoto.id] = remoto; idsEnNube.add(remoto.id);
+        if (remoto.eliminadoEn) continue;   // en la papelera: no va a la lista
         idsCompartidos.add(remoto.id);
         espacioIdConocido[remoto.id] = remoto.espacioId || null;
         ESPACIO_POR_PROYECTO_LOCAL[remoto.id] = remoto.espacioId || null;
@@ -1471,6 +1764,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
       const mios = resMios.valor;
       for (const doc of mios) {
         docsRemotos[doc.id] = doc; idsEnNube.add(doc.id);
+        if (doc.eliminadoEn) continue;   // en la papelera: no va a la lista
         registrarCandadoAjeno(doc);
         espacioIdConocido[doc.id] = doc.espacioId || null;
         ESPACIO_POR_PROYECTO_LOCAL[doc.id] = doc.espacioId || null;
@@ -1497,6 +1791,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
       }
       for (const doc of deEspacio) {
         docsRemotos[doc.id] = doc; idsEnNube.add(doc.id);
+        if (doc.eliminadoEn) continue;   // en la papelera: no va a la lista
         espacioIdConocido[doc.id] = ESPACIO_ACTIVO_ID;
         ESPACIO_POR_PROYECTO_LOCAL[doc.id] = ESPACIO_ACTIVO_ID;
         registrarCandadoAjeno(doc);
@@ -1515,6 +1810,22 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   }
 
   if (!soloLocal) guardarEspacioPorProyectoLocal();
+
+  // Papelera: proyectos que alguien mandó a la papelera (de este espacio o de Propio). También se esconden
+  // las copias que este dispositivo todavía tenga de ellos. En el pase local (sin datos de la nube) se
+  // conserva la papelera del pase anterior para que no parpadee.
+  if (!soloLocal) {
+    const ctxPerm = { user, docs: docsRemotos, espacios: ESPACIOS, permisos: permisoEdicionConocido };
+    PAPELERA = Object.values(docsRemotos)
+      .filter((d) => d.eliminadoEn && (ESPACIO_ACTIVO_ID ? d.espacioId === ESPACIO_ACTIVO_ID : !d.espacioId))
+      .map((d) => {
+        const p = permisosDeProyecto(d.id, ctxPerm);
+        return { id: d.id, nombre: d.nombre || "(sin nombre)", eliminadoMs: marcaDeTiempoMs(d.eliminadoEn), por: d.eliminadoPorNombre || "", porUid: d.eliminadoPor || "", puedeRestaurar: p.puedeEditar, puedePurgar: p.esDueno || p.esDuenoEspacio };
+      });
+    lista = lista.filter((p) => !(docsRemotos[p.id] && docsRemotos[p.id].eliminadoEn));
+    // Pasados los 30 días se borran solos (los hace el primer dispositivo con permiso que abra la lista).
+    if (nubeCompleta) purgarEnSegundoPlano(PAPELERA.filter((i) => i.puedePurgar && diasDesde(i.eliminadoMs) >= DIAS_PAPELERA).map((i) => i.id));
+  }
 
   const conNombreTodos = [];
   const borradoresTodos = [];
@@ -1557,7 +1868,13 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   const buscadorCaret = buscadorPrevio ? buscadorPrevio.selectionStart : null;
   if (buscadorPrevio) BUSQUEDA_TEXTO = buscadorPrevio.value;
 
-  const ctxLista = { user, enNube: idsEnNube, nubeCompleta, docs: docsRemotos, espacios: ESPACIOS, candados: candadosAjenosPorProyecto, permisos: permisoEdicionConocido };
+  // "Sincronizado antes" = este dispositivo llegó a sincronizar el proyecto con la nube. Si ya no está en
+  // la nube, lo borró otra persona (o ya no tengo acceso): es una copia suelta que no debe volver a subirse.
+  const sincronizados = new Set();
+  await Promise.all(conNombre.map(async (p) => { if ((await versionLocalSincronizada(p.id)) !== null) sincronizados.add(p.id); }));
+  const zombis = new Set();
+  if (nubeCompleta) conNombre.forEach((p) => { if (sincronizados.has(p.id) && !idsEnNube.has(p.id)) zombis.add(p.id); });
+  const ctxLista = { user, enNube: idsEnNube, nubeCompleta, docs: docsRemotos, espacios: ESPACIOS, candados: candadosAjenosPorProyecto, permisos: permisoEdicionConocido, sincronizados, zombis };
 
   const controlOrden = `
     <div class="proy-orden-control">
@@ -1612,7 +1929,11 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
         ? `<div class="proy-cargando-spinner-wrap" aria-hidden="true"><div class="proy-cargando-spinner"></div><span>Cargando proyectos…</span></div>`
         : `<div class="proy-vacio"><svg class="icon proy-vacio-icono"><use href="#i-folder"/></svg><p>Todavía no tenés proyectos.<br>Creá el primero con el botón de abajo.</p></div>`)
     : "";
-  const cuerpoHTML = `${buscadorHTML}<div id="proy-vista-normal">${filaControles}${seccionRecientes}${seccionCarpetas}${seccionProyectos}${seccionBorradores}${vacio}</div>${resultadosBusqueda}`;
+  const accionablesPapelera = PAPELERA.filter((i) => i.puedeRestaurar || i.puedePurgar);
+  const seccionPapelera = (enRaiz && accionablesPapelera.length)
+    ? `<button type="button" id="proy-papelera-btn" style="display:flex;align-items:center;gap:8px;width:100%;max-width:560px;margin-top:10px;border:1px dashed var(--border);border-radius:12px;padding:11px 12px;font-size:var(--fs-sm);color:var(--text-secondary);cursor:pointer;background:transparent;font-family:inherit;text-align:left;">${icoPx("trash")}<span style="flex:1;">Papelera · ${accionablesPapelera.length}</span><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>`
+    : "";
+  const cuerpoHTML = `${buscadorHTML}<div id="proy-vista-normal">${filaControles}${seccionRecientes}${seccionCarpetas}${seccionProyectos}${seccionBorradores}${seccionPapelera}${vacio}</div>${resultadosBusqueda}`;
 
   overlay.innerHTML = `
     <div class="proy-header-full">
@@ -1715,19 +2036,32 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
     const entrada = lista.find((x) => x.id === id);
     const nombre = (entrada && entrada.data && entrada.data.projectInfo && entrada.data.projectInfo.nombre) || "";
     const espacioDe = espacioIdConocido[id] || "";
+    const zombi = ctxLista.zombis.has(id);
+    const deNube = !zombi && (!!ctxLista.docs[id] || ctxLista.sincronizados.has(id));
+    const ocupado = !!candadosAjenosPorProyecto[id];
     items.push({ i: n++, icono: "folder", texto: "Mover a carpeta", accion: () => abrirModalMoverACarpeta(id) });
+    if (zombi) {
+      // Ya no está en la nube: solo se puede quitar de este teléfono (o abrir y hacer una copia editable).
+      items.push({ sep: true });
+      items.push({ i: n++, icono: "trash", texto: "Quitar de este teléfono", peligro: true, accion: () => borrarProyectoOCarpeta(id, false, true, "zombi") });
+      return items;
+    }
+    // Renombrar y eliminar: quien tiene permiso de edición (dueña del proyecto, editores y dueña del espacio).
+    if (perm.puedeEditar) {
+      items.push({ i: n++, icono: "pencil", texto: ocupado ? "Renombrar (alguien lo está editando)" : "Renombrar", deshabilitado: ocupado, accion: () => abrirModalRenombrarProyecto(id, nombre, deNube) });
+    }
     if (perm.esDueno) {
-      const bloqueado = !!candadosAjenosPorProyecto[id];
-      items.push({ i: n++, icono: "switch", texto: bloqueado ? "Mover de espacio (alguien lo está editando)" : "Mover de espacio de trabajo", deshabilitado: bloqueado, accion: () => abrirModalMoverDeEspacio(id) });
+      items.push({ i: n++, icono: "switch", texto: ocupado ? "Mover de espacio (alguien lo está editando)" : "Mover de espacio de trabajo", deshabilitado: ocupado, accion: () => abrirModalMoverDeEspacio(id) });
     }
     if ((perm.esDueno || perm.esDuenoEspacio) && espacioDe) {
       items.push({ i: n++, icono: "user-check", texto: "Permisos", accion: () => abrirModalPermisosProyecto(id, nombre, espacioDe) });
     }
-    // Eliminar: por ahora solo la persona dueña del proyecto (así lo permiten las reglas de Firestore
-    // hoy). Nadie puede "quitar de su lista" un proyecto ajeno: si algo se elimina, es para todos.
-    if (perm.esDueno) {
+    // Nadie puede "quitar de su lista" un proyecto ajeno: si algo se elimina, es para todas las personas.
+    // En la nube va a la papelera; si solo existe en este teléfono se borra de verdad.
+    if (perm.puedeEditar) {
       items.push({ sep: true });
-      items.push({ i: n++, icono: "trash", texto: "Eliminar", peligro: true, accion: () => borrarProyectoOCarpeta(id, false, true) });
+      items.push({ i: n++, icono: "trash", texto: ocupado ? "Eliminar (alguien lo está editando)" : (deNube ? "Mover a la papelera" : "Eliminar"), peligro: true, deshabilitado: ocupado,
+        accion: () => (deNube ? moverAPapelera(id) : borrarProyectoOCarpeta(id, false, true, "local")) });
     }
     return items;
   };
@@ -1762,6 +2096,8 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
     CARPETA_ACTIVA_ID = carpetaActiva ? (carpetaActiva.padreId || null) : null;
     renderPantallaProyectos(permitirCerrar);
   });
+  const btnPapelera = document.getElementById("proy-papelera-btn");
+  if (btnPapelera) btnPapelera.addEventListener("click", abrirModalPapelera);
   const detBorradores = document.getElementById("proy-borradores");
   if (detBorradores) detBorradores.addEventListener("toggle", () => { BORRADORES_ABIERTO = detBorradores.open; });
 

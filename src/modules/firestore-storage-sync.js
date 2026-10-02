@@ -158,16 +158,27 @@ async function fsDescargarImagenesComoJson(imagenesUrls) {
 // proyectos/{proyectoId}/) — se usa junto con fsBorrarProyectoDeNube al
 // borrar un proyecto propio. Carpeta vacía o inexistente (proyecto sin
 // fotos, o ya borrado antes) no es un error, sigue igual.
-async function fsBorrarFotosDeProyecto(proyectoId) {
+async function fsBorrarFotosDeProyecto(proyectoId, claves) {
+  // Las reglas de Storage solo permiten bajar un archivo cuya ruta ya se conoce ("get"), no listar la
+  // carpeta: por eso las fotos se borran POR CLAVE (las claves están en el documento del proyecto) y
+  // listAll() queda solo como respaldo. Antes solo existía listAll(), que las reglas rechazan: las fotos
+  // de los proyectos borrados nunca se borraban de Storage.
+  const lista = Array.isArray(claves) ? claves : [];
+  if (lista.length > 0) {
+    await ejecutarConLimite(lista, 5, async (key) => {
+      try {
+        await storage().ref("proyectos/" + proyectoId + "/" + key).delete();
+      } catch (e) {
+        if (!e || e.code !== "storage/object-not-found") console.error("No se pudo borrar la foto " + key, e);
+      }
+    });
+  }
   try {
     const carpeta = storage().ref("proyectos/" + proyectoId);
     const listado = await carpeta.listAll();
     await Promise.all(listado.items.map((item) => item.delete().catch(() => {})));
   } catch (e) {
-    // Sin señal, o la carpeta nunca existió — no bloquea el borrado del
-    // documento, que es lo importante; las fotos quedan huérfanas en
-    // Storage pero sin nada que las liste ni las cobre de forma relevante
-    // a este volumen.
+    // Sin permiso de listar, sin señal o carpeta inexistente: no bloquea nada.
   }
 }
 
