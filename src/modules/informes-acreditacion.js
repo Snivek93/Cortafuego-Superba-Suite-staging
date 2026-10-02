@@ -391,12 +391,11 @@ function renderHistorialHTML() {
   const lista = INFORMES_ACREDITACION.slice().sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
   const filas = lista.map((informe) => {
     const estado = estadoInformeLabel(informe);
-    const firmanteLabel = informe.inspector === "sebastian" ? "Arq. Sebastián Rojas Sonderegger" : "Ing. Kevin Soto Navarro";
     return `
       <div class="acr-card">
         <div class="acr-card-main">
           <div class="acr-card-fecha">${escapeHtml(tituloInformeLista(informe))}</div>
-          <div class="acr-card-sub">${escapeHtml([informe.fecha || "(sin fecha)", firmanteLabel].join(" · "))} · ${informe.elementos.length} elemento(s) · ${informe.fotos.length} foto(s)</div>
+          <div class="acr-card-sub">${escapeHtml(informe.fecha || "(sin fecha)")}</div>
           <span class="acr-badge ${estado.clase}">${estado.texto}</span>
         </div>
         <div class="acr-card-actions">
