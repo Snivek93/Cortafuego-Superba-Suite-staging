@@ -17,6 +17,18 @@ let MODO_ORDEN = "reciente";
 let BUSQUEDA_TEXTO = "";
 let BORRADORES_ABIERTO = false;
 let CARPETA_ACTIVA_ID = null;
+// ---- Carpetas sincronizadas (fase 2): CARPETAS y CARPETA_ASIGNACIONES son las del contexto activo
+// (el espacio de trabajo elegido, o "Propio" = la cuenta de cada persona).
+let CTX_CARPETAS = { tipo: "local", id: null, clave: "u" };
+let CARPETAS_FIRMA_REMOTA = "";
+let ESCRITURAS_CARPETAS_EN_CURSO = 0;
+let UNSUB_CARPETAS = null;
+let CTX_ESCUCHADO = "";
+let LEGACY_CARPETAS = { carpetas: [], asign: {} };
+let MIGRACION_PENDIENTE = false;
+let MIGRACION_MOSTRANDO = false;
+let IDS_PROYECTOS_CTX = [];
+let REFRESCO_CARPETAS_TIMER = null;
 let ESPACIOS = [];
 let ESPACIO_ACTIVO_ID = null;
 let INVITACIONES_ESPACIO = [];
@@ -72,9 +84,10 @@ function formatearFechaRelativa(iso) {
 // Con soloLocal, ESPACIOS/INVITACIONES_ESPACIO se dejan como estén (lo que
 // haya quedado de la última sincronización real) en vez de vaciarlos a []
 // — así el selector de espacio no parpadea a "Propio" por un instante.
-async function cargarEstadoOrganizacion(soloLocal) {
-  try { CARPETAS = (await window.idbLeerMetaClave("carpetas")) || []; } catch (e) { CARPETAS = []; }
-  try { CARPETA_ASIGNACIONES = (await window.idbLeerMetaClave("carpetaAsignaciones")) || {}; } catch (e) { CARPETA_ASIGNACIONES = {}; }
+async function cargarEstadoOrganizacion(soloLocal, prefetch) {
+  // Carpetas guardadas SOLO en este dispositivo (antes de la sincronización): se ofrecen una vez para subirlas.
+  try { LEGACY_CARPETAS.carpetas = (await window.idbLeerMetaClave("carpetas")) || []; } catch (e) { LEGACY_CARPETAS.carpetas = []; }
+  try { LEGACY_CARPETAS.asign = (await window.idbLeerMetaClave("carpetaAsignaciones")) || {}; } catch (e) { LEGACY_CARPETAS.asign = {}; }
   try { ORDEN_MANUAL = (await window.idbLeerMetaClave("ordenManual")) || { raiz: [], porCarpeta: {} }; } catch (e) { ORDEN_MANUAL = { raiz: [], porCarpeta: {} }; }
   if (!ORDEN_MANUAL.porCarpeta) ORDEN_MANUAL.porCarpeta = {};
   try {
@@ -106,8 +119,11 @@ async function cargarEstadoOrganizacion(soloLocal) {
   if (!soloLocal) {
     ESPACIOS = [];
     if (user && window.fsListarMisEspacios) {
-      try { ESPACIOS = await window.fsListarMisEspacios(user.uid); } catch (e) { ESPACIOS = []; }
+      try { ESPACIOS = await window.fsListarMisEspacios(user.uid); guardarCacheEspacios(user); }
+      catch (e) { ESPACIOS = await leerCacheEspacios(user); }   // sin conexión: la última lista conocida
     }
+  } else if (!ESPACIOS.length && user) {
+    ESPACIOS = await leerCacheEspacios(user);   // primer pintado: ya se sabe en qué espacio estaba
   }
   try {
     const espacioGuardado = await window.idbLeerMetaClave("espacioActivoId");
@@ -120,9 +136,10 @@ async function cargarEstadoOrganizacion(soloLocal) {
       try { INVITACIONES_ESPACIO = await promesaInvitaciones; } catch (e) { INVITACIONES_ESPACIO = []; }
     }
   }
+  await cargarCarpetasDelContexto(soloLocal, prefetch);
 }
-function guardarCarpetas() { window.idbGuardarMetaClave && window.idbGuardarMetaClave("carpetas", CARPETAS).catch(() => {}); }
-function guardarAsignaciones() { window.idbGuardarMetaClave && window.idbGuardarMetaClave("carpetaAsignaciones", CARPETA_ASIGNACIONES).catch(() => {}); }
+function guardarCarpetas() { guardarCacheCarpetas(); }
+function guardarAsignaciones() { guardarCacheCarpetas(); }
 function guardarEspacioPorProyectoLocal() { window.idbGuardarMetaClave && window.idbGuardarMetaClave("espacioPorProyecto", ESPACIO_POR_PROYECTO_LOCAL).catch(() => {}); }
 function guardarOrdenManual() { window.idbGuardarMetaClave && window.idbGuardarMetaClave("ordenManual", ORDEN_MANUAL).catch(() => {}); }
 function guardarModoOrden() { window.idbGuardarMetaClave && window.idbGuardarMetaClave("modoOrden", MODO_ORDEN).catch(() => {}); }
@@ -220,8 +237,7 @@ function abrirModalRenombrarCarpeta(carpetaId) {
   const guardar = () => {
     const nombre = input.value.trim();
     if (!nombre) return;
-    carpeta.nombre = nombre;
-    guardarCarpetas();
+    accionRenombrarCarpeta(carpetaId, nombre);
     overlay.remove();
     renderPantallaProyectos(!!window.PROYECTO_ACTIVO_ID);
   };
@@ -263,7 +279,7 @@ function tarjetaProyectoNuevaHTML(id, data, ctx, opciones) {
   opciones = opciones || {};
   const nombre = (data.projectInfo && data.projectInfo.nombre) || "Sin nombre";
   const cliente = data.projectInfo && data.projectInfo.cliente ? data.projectInfo.cliente : "";
-  const carpetaId = CARPETA_ASIGNACIONES[id];
+  const carpetaId = carpetaDe(id);
   const carpeta = carpetaId ? CARPETAS.find((c) => c.id === carpetaId) : null;
   const sub = opciones.mostrarCarpeta
     ? [carpeta ? carpeta.nombre : "Sin carpeta", formatearFechaRelativa(data.guardadoEn)].join(" · ")
@@ -299,6 +315,302 @@ function filaCarpetaHTML(carpeta, cantidad) {
       <button type="button" class="proy-card-menu-btn" data-id="${escapeHtml(carpeta.id)}" data-tipo="carpeta" aria-label="Más opciones" aria-haspopup="menu">${icoPx("dots")}</button>
       <svg class="icon proy-carpeta-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
     </div>`;
+}
+
+// ============================================================================
+// Carpetas sincronizadas (fase 2)
+// ----------------------------------------------------------------------------
+// Dónde viven: en el propio documento del espacio de trabajo (espacios/{id}) o, en "Propio", en el
+// documento de la persona (usuarios/{uid}). Dos mapas:
+//   carpetas:           { [carpetaId]: { nombre, padreId, creadoPor, creadoEn } }
+//   carpetaDeProyecto:  { [proyectoId]: carpetaId }
+// El documento del espacio ya se lee cada vez que se carga la lista, así que las carpetas llegan sin
+// lecturas extra. Los cambios se escriben por campo (carpetas.<id>.nombre, etc.), no el mapa completo,
+// así dos personas editando carpetas a la vez no se pisan. Mover un proyecto de carpeta NO toca el
+// documento del proyecto (no choca con el candado de edición).
+// Quién puede qué: crear, renombrar y mover, cualquier miembro. Borrar una carpeta: la persona dueña del
+// espacio o quien la creó (se aplica en la app).
+// ============================================================================
+const BORRAR_CAMPO = "__borrar__";
+// Copia local de la lista de espacios: sin ella, si la nube no responde (sin señal en obra), la app olvidaba
+// el espacio activo y caía a "Propio" — y con eso también perdía sus carpetas y sus proyectos.
+async function guardarCacheEspacios(user) {
+  if (!user || !window.idbGuardarMetaClave) return;
+  const liviano = ESPACIOS.map((e) => ({ id: e.id, nombre: e.nombre, miembrosUids: e.miembrosUids || [], creadoPor: e.creadoPor || "", carpetas: e.carpetas || {}, carpetaDeProyecto: e.carpetaDeProyecto || {} }));
+  try { await window.idbGuardarMetaClave("espaciosCache:" + user.uid, liviano); } catch (e) {}
+}
+async function leerCacheEspacios(user) {
+  if (!user || !window.idbLeerMetaClave) return [];
+  try { const c = await window.idbLeerMetaClave("espaciosCache:" + user.uid); return Array.isArray(c) ? c : []; } catch (e) { return []; }
+}
+function usuarioCarpetas() { return window.usuarioActual ? window.usuarioActual() : null; }
+function contextoCarpetas() {
+  const user = usuarioCarpetas();
+  if (ESPACIO_ACTIVO_ID) return { tipo: "espacio", id: ESPACIO_ACTIVO_ID, clave: "e:" + ESPACIO_ACTIVO_ID };
+  if (user) return { tipo: "usuario", id: user.uid, clave: "u" };
+  return { tipo: "local", id: null, clave: "u" };
+}
+function firmaCarpetas(carpetas, asign) {
+  const cs = carpetas.slice().sort((a, b) => (a.id < b.id ? -1 : 1)).map((c) => [c.id, c.nombre || "", c.padreId || null, c.creadoPor || "", c.creadoEn || ""]);
+  const as = Object.keys(asign || {}).sort().map((k) => [k, asign[k]]);
+  return JSON.stringify([cs, as]);
+}
+function carpetasDesdeMapa(mapa) {
+  return Object.keys(mapa || {}).map((id) => {
+    const c = mapa[id] || {};
+    return { id, nombre: c.nombre || "", padreId: c.padreId || null, creadoPor: c.creadoPor || "", creadoEn: c.creadoEn || "" };
+  });
+}
+function cargarDatosContenedor(datos) {
+  CARPETAS = carpetasDesdeMapa(datos && datos.carpetas);
+  CARPETA_ASIGNACIONES = Object.assign({}, (datos && datos.carpetaDeProyecto) || {});
+  CARPETAS_FIRMA_REMOTA = firmaCarpetas(CARPETAS, CARPETA_ASIGNACIONES);
+}
+function guardarCacheCarpetas() {
+  if (!window.idbGuardarMetaClave) return;
+  window.idbGuardarMetaClave("carpetasCtx:" + CTX_CARPETAS.clave, { carpetas: CARPETAS, asign: CARPETA_ASIGNACIONES }).catch(() => {});
+}
+// Carpeta a la que pertenece un proyecto, o null si no tiene o si esa carpeta ya no existe.
+function carpetaDe(proyectoId) {
+  const c = CARPETA_ASIGNACIONES[proyectoId];
+  return (c && CARPETAS.some((x) => x.id === c)) ? c : null;
+}
+function esDuenoDelEspacioActivo() {
+  const user = usuarioCarpetas();
+  if (!ESPACIO_ACTIVO_ID || !user) return false;
+  const e = ESPACIOS.find((x) => x.id === ESPACIO_ACTIVO_ID);
+  return !!(e && e.creadoPor === user.uid);
+}
+function puedeBorrarCarpeta(carpeta) {
+  if (CTX_CARPETAS.tipo !== "espacio") return true;
+  const user = usuarioCarpetas();
+  return esDuenoDelEspacioActivo() || (!!user && !!carpeta && carpeta.creadoPor === user.uid);
+}
+
+function firestoreDisponibleCarpetas() { return typeof firebase !== "undefined" && !!firebase && typeof firebase.firestore === "function"; }
+function refContenedorCarpetas(ctx) {
+  const d = firebase.firestore();
+  return ctx.tipo === "espacio" ? d.collection("espacios").doc(ctx.id) : d.collection("usuarios").doc(ctx.id);
+}
+function aObjetoAnidado(cambios) {
+  const raiz = {};
+  Object.keys(cambios).forEach((ruta) => {
+    const partes = ruta.split(".");
+    let n = raiz;
+    partes.slice(0, -1).forEach((p) => { n[p] = n[p] || {}; n = n[p]; });
+    n[partes[partes.length - 1]] = cambios[ruta] === BORRAR_CAMPO ? firebase.firestore.FieldValue.delete() : cambios[ruta];
+  });
+  return raiz;
+}
+async function escribirCarpetasRemoto(ctx, cambios) {
+  if (ctx.tipo === "local" || !firestoreDisponibleCarpetas()) return false;
+  const ref = refContenedorCarpetas(ctx);
+  const upd = {};
+  Object.keys(cambios).forEach((r) => { upd[r] = cambios[r] === BORRAR_CAMPO ? firebase.firestore.FieldValue.delete() : cambios[r]; });
+  try {
+    await ref.update(upd);
+  } catch (e) {
+    // El documento de la persona se crea con la primera carpeta; el del espacio ya existe siempre.
+    const noExiste = !!e && (e.code === "not-found" || /not[- ]found|No document to update/i.test(String(e.message || "")));
+    if (ctx.tipo === "usuario" && noExiste) await ref.set(aObjetoAnidado(cambios), { merge: true });
+    else throw e;
+  }
+  return true;
+}
+async function leerCarpetasUsuario(uid) {
+  if (!firestoreDisponibleCarpetas()) throw new Error("Firestore no disponible");
+  const snap = await firebase.firestore().collection("usuarios").doc(uid).get();
+  return snap.exists ? snap.data() : {};
+}
+
+// Escribe en la nube SIN hacer esperar a la pantalla: el cambio ya se ve en el dispositivo. Mientras haya
+// escrituras en curso no se pisa el estado local con lo que diga la nube (todavía no las incluye).
+function sincronizarCarpetas(cambios) {
+  const ctx = CTX_CARPETAS;
+  ESCRITURAS_CARPETAS_EN_CURSO++;
+  let ok = false;
+  escribirCarpetasRemoto(ctx, cambios).then(() => { ok = true; }).catch((err) => {
+    console.error("No se pudo guardar el cambio de carpetas en la nube:", err);
+    if (window.mostrarToast) mostrarToast("No se pudo guardar el cambio de carpetas en la nube. Revisá tu conexión.", "error");
+  }).then(() => {
+    ESCRITURAS_CARPETAS_EN_CURSO = Math.max(0, ESCRITURAS_CARPETAS_EN_CURSO - 1);
+    if (ESCRITURAS_CARPETAS_EN_CURSO === 0) {
+      if (ok && CTX_CARPETAS.clave === ctx.clave) CARPETAS_FIRMA_REMOTA = firmaCarpetas(CARPETAS, CARPETA_ASIGNACIONES);
+      programarRefrescoCarpetas(ok ? 800 : 200);
+    }
+  });
+}
+function programarRefrescoCarpetas(ms) {
+  clearTimeout(REFRESCO_CARPETAS_TIMER);
+  REFRESCO_CARPETAS_TIMER = setTimeout(() => {
+    const ov = document.getElementById("pantalla-proyectos");
+    if (ov && !ov.hidden) renderPantallaProyectos(ULTIMO_PERMITIR_CERRAR, false);
+  }, ms);
+}
+
+function accionCrearCarpeta(nombre, padreId) {
+  const user = usuarioCarpetas();
+  const id = "c_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
+  const carpeta = { id, nombre, padreId: padreId || null, creadoPor: user ? user.uid : "", creadoEn: new Date().toISOString() };
+  CARPETAS.push(carpeta);
+  guardarCacheCarpetas();
+  sincronizarCarpetas({ ["carpetas." + id]: { nombre: carpeta.nombre, padreId: carpeta.padreId, creadoPor: carpeta.creadoPor, creadoEn: carpeta.creadoEn } });
+  return id;
+}
+function accionRenombrarCarpeta(id, nombre) {
+  const c = CARPETAS.find((x) => x.id === id);
+  if (!c) return;
+  c.nombre = nombre;
+  guardarCacheCarpetas();
+  sincronizarCarpetas({ ["carpetas." + id + ".nombre"]: nombre });
+}
+function accionBorrarCarpeta(id) {
+  const cambios = { ["carpetas." + id]: BORRAR_CAMPO };
+  CARPETAS.forEach((c) => { if (c.padreId === id) cambios["carpetas." + c.id + ".padreId"] = null; });
+  Object.keys(CARPETA_ASIGNACIONES).forEach((pid) => { if (CARPETA_ASIGNACIONES[pid] === id) cambios["carpetaDeProyecto." + pid] = BORRAR_CAMPO; });
+  CARPETAS = CARPETAS.filter((c) => c.id !== id).map((c) => c.padreId === id ? Object.assign({}, c, { padreId: null }) : c);
+  Object.keys(CARPETA_ASIGNACIONES).forEach((pid) => { if (CARPETA_ASIGNACIONES[pid] === id) delete CARPETA_ASIGNACIONES[pid]; });
+  delete ORDEN_MANUAL.porCarpeta[id];
+  guardarOrdenManual();
+  guardarCacheCarpetas();
+  sincronizarCarpetas(cambios);
+}
+// carpetaId = null → "Sin carpeta"
+function accionMoverProyecto(proyectoId, carpetaId) {
+  if (carpetaId) {
+    CARPETA_ASIGNACIONES[proyectoId] = carpetaId;
+    sincronizarCarpetas({ ["carpetaDeProyecto." + proyectoId]: carpetaId });
+  } else {
+    if (!(proyectoId in CARPETA_ASIGNACIONES)) return;
+    delete CARPETA_ASIGNACIONES[proyectoId];
+    sincronizarCarpetas({ ["carpetaDeProyecto." + proyectoId]: BORRAR_CAMPO });
+  }
+  guardarCacheCarpetas();
+}
+
+// Carga las carpetas del contexto activo: primero la copia local (instantánea y sirve sin conexión) y,
+// con conexión, lo que dice la nube (que manda).
+async function cargarCarpetasDelContexto(soloLocal, prefetch) {
+  const nuevo = contextoCarpetas();
+  const cambioCtx = nuevo.clave !== CTX_CARPETAS.clave;
+  CTX_CARPETAS = nuevo;
+  if (cambioCtx) CARPETAS_FIRMA_REMOTA = "";
+  if (cambioCtx || ESCRITURAS_CARPETAS_EN_CURSO === 0) {
+    let cache = null;
+    try { cache = await window.idbLeerMetaClave("carpetasCtx:" + CTX_CARPETAS.clave); } catch (e) { cache = null; }
+    CARPETAS = cache && Array.isArray(cache.carpetas) ? cache.carpetas : [];
+    CARPETA_ASIGNACIONES = cache && cache.asign ? cache.asign : {};
+  }
+  MIGRACION_PENDIENTE = false;
+  if (soloLocal || ESCRITURAS_CARPETAS_EN_CURSO > 0 || CTX_CARPETAS.tipo === "local") return;
+  let datos = null;
+  try {
+    if (CTX_CARPETAS.tipo === "espacio") {
+      const e = ESPACIOS.find((x) => x.id === CTX_CARPETAS.id);
+      datos = e ? { carpetas: e.carpetas, carpetaDeProyecto: e.carpetaDeProyecto } : null;
+    } else if (prefetch && prefetch.carpetasUsuario) {
+      const r = await prefetch.carpetasUsuario;
+      if (!r.ok) throw r.error;
+      datos = r.valor;
+    } else {
+      datos = await leerCarpetasUsuario(CTX_CARPETAS.id);
+    }
+  } catch (e) {
+    console.error("No se pudieron traer las carpetas de la nube (se usa la copia de este dispositivo)", e);
+    datos = null;
+  }
+  if (!datos) return;
+  cargarDatosContenedor(datos);
+  guardarCacheCarpetas();
+  if (CARPETAS.length === 0 && LEGACY_CARPETAS.carpetas.length > 0) {
+    let marca = null;
+    try { marca = await window.idbLeerMetaClave("migracionCarpetas:" + CTX_CARPETAS.clave); } catch (e) { marca = null; }
+    if (!marca) MIGRACION_PENDIENTE = true;
+  }
+}
+
+// Escucha en vivo los cambios de carpetas hechos por otras personas (u otro dispositivo mío).
+function detenerListenerCarpetas() {
+  if (UNSUB_CARPETAS) { try { UNSUB_CARPETAS(); } catch (e) {} }
+  UNSUB_CARPETAS = null; CTX_ESCUCHADO = "";
+}
+function asegurarListenerCarpetas() {
+  const ctx = CTX_CARPETAS;
+  if (ctx.tipo === "local" || !firestoreDisponibleCarpetas()) { detenerListenerCarpetas(); return; }
+  if (CTX_ESCUCHADO === ctx.clave && UNSUB_CARPETAS) return;
+  detenerListenerCarpetas();
+  CTX_ESCUCHADO = ctx.clave;
+  try {
+    UNSUB_CARPETAS = refContenedorCarpetas(ctx).onSnapshot((snap) => {
+      if (CTX_ESCUCHADO !== ctx.clave) return;
+      if (snap.metadata && snap.metadata.hasPendingWrites) return;
+      if (ESCRITURAS_CARPETAS_EN_CURSO > 0) return;
+      const d = snap.exists ? snap.data() : {};
+      if (firmaCarpetas(carpetasDesdeMapa(d.carpetas), d.carpetaDeProyecto || {}) === CARPETAS_FIRMA_REMOTA) return;
+      cargarDatosContenedor(d);
+      guardarCacheCarpetas();
+      programarRefrescoCarpetas(250);
+    }, (err) => console.error("Error escuchando las carpetas en vivo", err));
+  } catch (e) {
+    console.error("No se pudo escuchar las carpetas en vivo", e);
+    UNSUB_CARPETAS = null; CTX_ESCUCHADO = "";
+  }
+}
+
+// Una sola vez por contexto: ofrece subir las carpetas que esta persona ya tenía guardadas en el teléfono.
+function ofrecerMigracionCarpetas() {
+  if (!MIGRACION_PENDIENTE || MIGRACION_MOSTRANDO) return;
+  MIGRACION_MOSTRANDO = true;
+  const clave = CTX_CARPETAS.clave;
+  const esEspacio = CTX_CARPETAS.tipo === "espacio";
+  const esp = esEspacio ? ESPACIOS.find((x) => x.id === CTX_CARPETAS.id) : null;
+  const destino = esEspacio ? "el espacio «" + ((esp && esp.nombre) || "este espacio") + "»" : "tu cuenta";
+  const n = LEGACY_CARPETAS.carpetas.length;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <p style="font-weight:600;margin:0 0 10px;">Carpetas guardadas en este teléfono</p>
+      <p style="margin:0 0 14px;font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;">Tenés ${n} carpeta${n === 1 ? "" : "s"} que solo existen en este teléfono. ¿Querés subirlas a ${escapeHtml(destino)} para verlas en todos tus dispositivos${esEspacio ? " y que todo el equipo las vea" : ""}?</p>
+      <div class="modal-actions" style="flex-direction:column;align-items:stretch;">
+        <button class="primary" data-act="subir">Subir mis carpetas</button>
+        <button class="secondary" data-act="no">No, empezar sin carpetas</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const cerrar = () => { overlay.remove(); MIGRACION_MOSTRANDO = false; };
+  overlay.addEventListener("click", async (e) => {
+    if (e.target === overlay) { cerrar(); return; }   // se cierra sin decidir: se vuelve a preguntar
+    const act = e.target.dataset.act;
+    if (!act) return;
+    cerrar();
+    MIGRACION_PENDIENTE = false;
+    if (act === "subir") subirCarpetasLegacy();
+    try { await window.idbGuardarMetaClave("migracionCarpetas:" + clave, act === "subir" ? "hecho" : "omitido"); } catch (err) {}
+    if (act === "subir") renderPantallaProyectos(ULTIMO_PERMITIR_CERRAR, true);
+  });
+}
+function subirCarpetasLegacy() {
+  const user = usuarioCarpetas();
+  const idsDelContexto = new Set(IDS_PROYECTOS_CTX);
+  const validas = LEGACY_CARPETAS.carpetas.filter((c) => c && c.id && c.nombre);
+  const cambios = {};
+  validas.forEach((c) => {
+    const carpeta = { id: c.id, nombre: c.nombre, padreId: c.padreId || null, creadoPor: user ? user.uid : "", creadoEn: c.creadoEn || new Date().toISOString() };
+    CARPETAS.push(carpeta);
+    cambios["carpetas." + c.id] = { nombre: carpeta.nombre, padreId: carpeta.padreId, creadoPor: carpeta.creadoPor, creadoEn: carpeta.creadoEn };
+  });
+  // Solo las asignaciones de proyectos que pertenecen a este contexto (las demás son de otro espacio).
+  Object.keys(LEGACY_CARPETAS.asign).forEach((pid) => {
+    const cid = LEGACY_CARPETAS.asign[pid];
+    if (idsDelContexto.has(pid) && validas.some((c) => c.id === cid)) {
+      CARPETA_ASIGNACIONES[pid] = cid;
+      cambios["carpetaDeProyecto." + pid] = cid;
+    }
+  });
+  if (!Object.keys(cambios).length) return;
+  guardarCacheCarpetas();
+  sincronizarCarpetas(cambios);
 }
 
 function ordenarProyectos(lista, modo, carpetaId) {
@@ -420,9 +732,7 @@ function abrirModalNuevaCarpeta(padreId) {
   const crear = async () => {
     const nombre = input.value.trim();
     if (!nombre) return;
-    const id = "c_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
-    CARPETAS.push({ id, nombre, creadoEn: new Date().toISOString(), padreId: padreId || null });
-    guardarCarpetas();
+    accionCrearCarpeta(nombre, padreId);
     overlay.remove();
     renderPantallaProyectos(!!window.PROYECTO_ACTIVO_ID);
   };
@@ -456,9 +766,8 @@ function abrirModalMoverACarpeta(proyectoId) {
     if (!act) return;
     overlay.remove();
     if (act === "cancelar") return;
-    if (act === "sin-carpeta") delete CARPETA_ASIGNACIONES[proyectoId];
-    else if (act.startsWith("carpeta:")) CARPETA_ASIGNACIONES[proyectoId] = act.slice(8);
-    guardarAsignaciones();
+    if (act === "sin-carpeta") accionMoverProyecto(proyectoId, null);
+    else if (act.startsWith("carpeta:")) accionMoverProyecto(proyectoId, act.slice(8));
     renderPantallaProyectos(!!window.PROYECTO_ACTIVO_ID);
   });
 }
@@ -756,6 +1065,8 @@ function abrirModalMoverDeEspacio(proyectoId) {
     e.target.disabled = true;
     try {
       await window.fsMoverProyectoDeEspacio(proyectoId, nuevoEspacioId);
+      // Ya no está en este espacio: su carpeta de acá deja de aplicar (en el espacio nuevo arranca sin carpeta).
+      accionMoverProyecto(proyectoId, null);
       overlay.remove();
       renderPantallaProyectos(!!window.PROYECTO_ACTIVO_ID);
     } catch (err) {
@@ -1004,14 +1315,14 @@ function actualizarMetadataListadoSiHaceFalta(doc, lista) {
 function borrarProyectoOCarpeta(id, esCarpeta, esPropio) {
   const hacerBorrado = async () => {
     if (esCarpeta) {
-      CARPETAS = CARPETAS
-        .filter((c) => c.id !== id)
-        .map((c) => c.padreId === id ? Object.assign({}, c, { padreId: null }) : c);
-      Object.keys(CARPETA_ASIGNACIONES).forEach((pid) => { if (CARPETA_ASIGNACIONES[pid] === id) delete CARPETA_ASIGNACIONES[pid]; });
-      delete ORDEN_MANUAL.porCarpeta[id];
-      if (CARPETA_ACTIVA_ID === id) CARPETA_ACTIVA_ID = null;
-      guardarCarpetas(); guardarAsignaciones(); guardarOrdenManual();
-      renderPantallaProyectos(ULTIMO_PERMITIR_CERRAR);
+      const carpeta = CARPETAS.find((c) => c.id === id);
+      if (!carpeta || !puedeBorrarCarpeta(carpeta)) {
+        if (window.mostrarToast) mostrarToast("Solo quien creó la carpeta o la persona dueña del espacio puede borrarla.", "error");
+        return;
+      }
+      if (CARPETA_ACTIVA_ID === id) CARPETA_ACTIVA_ID = carpeta.padreId || null;
+      accionBorrarCarpeta(id);
+      renderPantallaProyectos(ULTIMO_PERMITIR_CERRAR, true);
       return;
     }
     PROYECTOS_BORRANDO.add(id);
@@ -1026,8 +1337,7 @@ function borrarProyectoOCarpeta(id, esCarpeta, esPropio) {
       }
     }
     try { await window.idbBorrarProyecto(id); } catch (err) { console.error("No se pudo borrar el proyecto:", err); }
-    delete CARPETA_ASIGNACIONES[id];
-    guardarAsignaciones();
+    accionMoverProyecto(id, null);
     const user = window.usuarioActual ? window.usuarioActual() : null;
     const terminarLimpieza = () => {
       PROYECTOS_BORRANDO.delete(id);
@@ -1060,6 +1370,7 @@ function borrarProyectoOCarpeta(id, esCarpeta, esPropio) {
 async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   ULTIMO_PERMITIR_CERRAR = permitirCerrar;
   ligarClickGlobalUnaVez();
+  cerrarMenuFlotante();
   const overlay = crearOverlaySiHaceFalta();
   // Las consultas a Firestore salen TODAS A LA VEZ, antes de leer el estado local. Antes iban
   // una detrás de otra (unos 1,3 s sumadas en una compu con buena señal; mucho más en celular).
@@ -1081,9 +1392,11 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
       }) : null,
       mios: window.fsListarMisProyectosCompartidos ? intentar(() => window.fsListarMisProyectosCompartidos(userPre.uid)) : null,
       deEspacio: (espacioPre && window.fsListarProyectosDeEspacio) ? intentar(() => window.fsListarProyectosDeEspacio(espacioPre)) : null,
+      // Carpetas de "Propio" (documento de la persona): sale junto con las demás consultas.
+      carpetasUsuario: (!espacioPre && firestoreDisponibleCarpetas()) ? intentar(() => leerCarpetasUsuario(userPre.uid)) : null,
     };
   }
-  await cargarEstadoOrganizacion(soloLocal);
+  await cargarEstadoOrganizacion(soloLocal, prefetch);
 
   let lista = [];
   try {
@@ -1219,9 +1532,10 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   const nivelActual = carpetaActiva ? (carpetaActiva.padreId ? 2 : 1) : 0;
   const puedeCrearSubcarpeta = nivelActual < 2;
 
+  IDS_PROYECTOS_CTX = conNombre.map((p) => p.id);
   const proyectosVisibles = CARPETA_ACTIVA_ID
-    ? conNombre.filter(p => CARPETA_ASIGNACIONES[p.id] === CARPETA_ACTIVA_ID)
-    : conNombre.filter(p => !CARPETA_ASIGNACIONES[p.id]);
+    ? conNombre.filter(p => carpetaDe(p.id) === CARPETA_ACTIVA_ID)
+    : conNombre.filter(p => !carpetaDe(p.id));
   const proyectosOrdenados = ordenarProyectos(proyectosVisibles, MODO_ORDEN, CARPETA_ACTIVA_ID);
 
   const carpetasVisibles = CARPETAS.filter(c => (c.padreId || null) === CARPETA_ACTIVA_ID);
@@ -1269,7 +1583,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   // Recientes: los últimos 3 por fecha de actualización (de todo el espacio, estén o no en carpetas).
   // Solo se muestran cuando aportan algo: hay proyectos metidos en carpetas o hay más de 3.
   const recientes = ordenarProyectos(conNombre, "reciente", null).slice(0, 3);
-  const hayProyectosEnCarpetas = conNombre.some((p) => CARPETA_ASIGNACIONES[p.id]);
+  const hayProyectosEnCarpetas = conNombre.some((p) => carpetaDe(p.id));
   const mostrarRecientes = enRaiz && recientes.length > 0 && (hayProyectosEnCarpetas || conNombre.length > 3);
   const seccionRecientes = mostrarRecientes
     ? `<p class="proy-sec-label">Recientes</p><div class="proy-lista">${recientes.map((p) => tarjetaProyectoNuevaHTML(p.id, p.data, ctxLista, { mostrarCarpeta: true })).join("")}</div>`
@@ -1386,8 +1700,11 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
     const items = []; let n = 0;
     if (tipo === "carpeta") {
       items.push({ i: n++, icono: "pencil", texto: "Renombrar", accion: () => abrirModalRenombrarCarpeta(id) });
-      items.push({ sep: true });
-      items.push({ i: n++, icono: "trash", texto: "Eliminar carpeta", peligro: true, accion: () => borrarProyectoOCarpeta(id, true, true) });
+      // Borrar: solo quien creó la carpeta o la persona dueña del espacio.
+      if (puedeBorrarCarpeta(CARPETAS.find((c) => c.id === id))) {
+        items.push({ sep: true });
+        items.push({ i: n++, icono: "trash", texto: "Eliminar carpeta", peligro: true, accion: () => borrarProyectoOCarpeta(id, true, true) });
+      }
       return items;
     }
     if (tipo === "borrador") {
@@ -1448,6 +1765,11 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   const detBorradores = document.getElementById("proy-borradores");
   if (detBorradores) detBorradores.addEventListener("toggle", () => { BORRADORES_ABIERTO = detBorradores.open; });
 
+  if (!soloLocal && !overlay.hidden) {
+    asegurarListenerCarpetas();
+    ofrecerMigracionCarpetas();
+  }
+
   const btnCerrar = document.getElementById("proy-btn-cerrar");
   if (btnCerrar) btnCerrar.addEventListener("click", ocultarPantallaProyectos);
 
@@ -1474,8 +1796,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
       try {
         const nuevoId = await window.crearYAbrirProyectoNuevo();
         if (CARPETA_ACTIVA_ID && nuevoId) {
-          CARPETA_ASIGNACIONES[nuevoId] = CARPETA_ACTIVA_ID;
-          guardarAsignaciones();
+          accionMoverProyecto(nuevoId, CARPETA_ACTIVA_ID);
         }
         ocultarPantallaProyectos();
       } finally {
@@ -1599,6 +1920,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
 function ocultarPantallaProyectos() {
   const overlay = document.getElementById("pantalla-proyectos");
   if (!overlay) return;
+  detenerListenerCarpetas();
   overlay.classList.remove("proy-visible");
   setTimeout(() => { overlay.hidden = true; }, 200);
   if (window.mostrarVistaProyecto) window.mostrarVistaProyecto();
