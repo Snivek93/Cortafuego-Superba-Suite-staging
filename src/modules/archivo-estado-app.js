@@ -8,6 +8,8 @@ var PROYECTO_ACTIVO_FS_VERSION = null;
 var PROYECTO_ACTIVO_CANDADO_PROPIO = false;
 var PROYECTO_ACTIVO_MULTI_EDITOR = false;
 var PROYECTO_ACTIVO_SOLO_LECTURA = false;
+// true cuando edito un proyecto AJENO sin figurar en editoresUids: soy la persona dueña del espacio.
+var PROYECTO_ACTIVO_EDITA_AJENO = false;
 var PROYECTO_ACTIVO_HUBO_EDICION = false;
 (function () {
 let ULTIMO_GUARDADO = null;
@@ -430,7 +432,7 @@ async function manejarReconexion() {
     if (PROYECTO_ACTIVO_ID !== idAlEmpezar) return;
     if (!remoto) return;
     PROYECTO_ACTIVO_COMPARTIDO = true;
-    PROYECTO_ACTIVO_MULTI_EDITOR = Array.isArray(remoto.editoresUids) && remoto.editoresUids.length > 0;
+    PROYECTO_ACTIVO_MULTI_EDITOR = (Array.isArray(remoto.editoresUids) && remoto.editoresUids.length > 0) || PROYECTO_ACTIVO_EDITA_AJENO;
     const versionDesconocidaOAtrasada =
       PROYECTO_ACTIVO_FS_VERSION === null || remoto.version !== PROYECTO_ACTIVO_FS_VERSION;
     if (PROYECTO_ACTIVO_HUBO_EDICION && versionDesconocidaOAtrasada) {
@@ -767,6 +769,7 @@ async function detectarSiEsCompartido(id) {
   PROYECTO_ACTIVO_FS_VERSION = null;
   PROYECTO_ACTIVO_CANDADO_PROPIO = false;
   PROYECTO_ACTIVO_MULTI_EDITOR = false;
+  PROYECTO_ACTIVO_EDITA_AJENO = false;
   if (!window.fsDescargarUltimaVersion || !window.usuarioActual) return;
   const user = window.usuarioActual();
   if (!user) return;
@@ -809,8 +812,18 @@ async function detectarSiEsCompartido(id) {
       // Sin este permiso, el proyecto se abre en solo lectura PERMANENTE,
       // sin importar si hay candado libre o no — no tiene sentido pedir un
       // candado que las reglas de Firestore igual van a rechazar al guardar.
-      const tieneAccesoEdicion = remoto.ownerId === user.uid
+      let tieneAccesoEdicion = remoto.ownerId === user.uid
         || (Array.isArray(remoto.editoresUids) && remoto.editoresUids.includes(user.uid));
+      // La persona dueña del espacio de trabajo también puede editar todo lo que hay en él.
+      if (!tieneAccesoEdicion && window.soyDuenoDelEspacioDelProyecto) {
+        try { tieneAccesoEdicion = await window.soyDuenoDelEspacioDelProyecto(id); } catch (e2) { tieneAccesoEdicion = false; }
+        if (PROYECTO_ACTIVO_ID !== id) return;
+        if (tieneAccesoEdicion) {
+          // Edita algo ajeno sin estar en editoresUids: se trata como proyecto de varias personas (candado).
+          PROYECTO_ACTIVO_EDITA_AJENO = true;
+          PROYECTO_ACTIVO_MULTI_EDITOR = true;
+        }
+      }
       if (!tieneAccesoEdicion) {
         aplicarModoSoloLectura(true, null, "permiso");
       } else if (PROYECTO_ACTIVO_MULTI_EDITOR) {
