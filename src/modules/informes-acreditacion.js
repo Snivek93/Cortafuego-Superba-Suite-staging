@@ -376,6 +376,17 @@ function estadoInformeLabel(informe) {
   if (noCumplen === 0) return { texto: "Todo cumple", clase: "acr-badge-ok" };
   return { texto: `${noCumplen} pendiente(s)`, clase: "acr-badge-warn" };
 }
+// Nombre visible de un informe en la lista: "Proyecto · Contratista" tal como quedaron guardados en ESE
+// informe (no el nombre actual del proyecto), para poder distinguirlos si luego cambia el proyecto o el
+// contratista. Si no tiene ninguno de los dos (informes viejos sin llenar), se usa la fecha.
+function tituloInformeLista(informe) {
+  const partes = [informe.proyecto, informe.cliente].map((x) => String(x || "").trim()).filter(Boolean);
+  return partes.length ? partes.join(" · ") : (informe.fecha || "(sin fecha)");
+}
+function parteNombreArchivo(texto, max) {
+  return String(texto || "").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, max).replace(/-+$/, "");
+}
+
 function renderHistorialHTML() {
   const lista = INFORMES_ACREDITACION.slice().sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
   const filas = lista.map((informe) => {
@@ -384,8 +395,8 @@ function renderHistorialHTML() {
     return `
       <div class="acr-card">
         <div class="acr-card-main">
-          <div class="acr-card-fecha">${escapeHtml(informe.fecha || "(sin fecha)")}</div>
-          <div class="acr-card-sub">${escapeHtml(firmanteLabel)} · ${informe.elementos.length} elemento(s) · ${informe.fotos.length} foto(s)</div>
+          <div class="acr-card-fecha">${escapeHtml(tituloInformeLista(informe))}</div>
+          <div class="acr-card-sub">${escapeHtml([informe.fecha || "(sin fecha)", firmanteLabel].join(" · "))} · ${informe.elementos.length} elemento(s) · ${informe.fotos.length} foto(s)</div>
           <span class="acr-badge ${estado.clase}">${estado.texto}</span>
         </div>
         <div class="acr-card-actions">
@@ -2540,7 +2551,7 @@ async function generarPDFInformeAcreditacion(informeId) {
       if (!(doc.__membretePags && doc.__membretePags.has(p))) pintarMembreteGarantizado(doc, titulo);
     }
     for (let p = 1; p <= total; p++) { doc.setPage(p); if (window.dibujarNumeroPaginaPDF) dibujarNumeroPaginaPDF(doc, p, total); }
-    const nombreArchivo = `Informe-Acreditacion-${(informe.proyecto || "proyecto").replace(/[^a-z0-9]+/gi, "-")}-${informe.fecha || ""}.pdf`;
+    const nombreArchivo = `Informe-Acreditacion-${(informe.proyecto || "proyecto").replace(/[^a-z0-9]+/gi, "-")}${parteNombreArchivo(informe.cliente, 40) ? "-" + parteNombreArchivo(informe.cliente, 40) : ""}-${informe.fecha || ""}.pdf`;
     let bytesFinales = new Uint8Array(doc.output("arraybuffer"));
     const conLink = sistemas.filter((s) => s.link);
     if (conLink.length && window.PDFLib) {
