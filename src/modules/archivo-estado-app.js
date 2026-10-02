@@ -146,8 +146,9 @@ function idbGuardarProyecto(id, valor) {
 // guardados localmente, porque nunca toca las filas ni las fotos.
 function idbListarIndiceProyectos() {
   return abrirIDB().then((db) => new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE_INDICE, "readonly");
+    const tx = db.transaction([IDB_STORE_INDICE, IDB_STORE_PROYECTOS], "readonly");
     const store = tx.objectStore(IDB_STORE_INDICE);
+    const reqClaves = tx.objectStore(IDB_STORE_PROYECTOS).getAllKeys();
     const out = [];
     const req = store.openCursor();
     req.onsuccess = (e) => {
@@ -159,9 +160,39 @@ function idbListarIndiceProyectos() {
           data: { projectInfo: { nombre: v.nombre || "", cliente: v.cliente || "" }, guardadoEn: v.guardadoEn || null, creadoEn: v.creadoEn || null },
         });
         cursor.continue();
-      } else resolve(out);
+      }
     };
     req.onerror = () => reject(req.error || new Error("Error al listar el índice de proyectos"));
+    tx.oncomplete = () => {
+      // Una entrada del índice sin su proyecto es un "fantasma" (un proyecto ya borrado): no se muestra y se limpia.
+      const existentes = new Set(reqClaves.result || []);
+      const validos = out.filter((x) => existentes.has(x.id));
+      const huerfanos = out.filter((x) => !existentes.has(x.id)).map((x) => x.id);
+      resolve(validos);
+      if (huerfanos.length) limpiarIndiceHuerfano(huerfanos);
+    };
+    tx.onerror = () => reject(tx.error || new Error("Error al listar el índice de proyectos"));
+  }));
+}
+// Borra del índice las entradas cuyo proyecto ya no existe. Se vuelve a comprobar dentro de la misma transacción
+// de escritura, por si justo se guardó un proyecto entre la lectura y esta limpieza.
+function limpiarIndiceHuerfano(ids) {
+  return abrirIDB().then((db) => new Promise((resolve) => {
+    const tx = db.transaction([IDB_STORE_INDICE, IDB_STORE_PROYECTOS], "readwrite");
+    ids.forEach((id) => {
+      const c = tx.objectStore(IDB_STORE_PROYECTOS).count(id);
+      c.onsuccess = () => { if (c.result === 0) tx.objectStore(IDB_STORE_INDICE).delete(id); };
+    });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => resolve();
+    tx.onabort = () => resolve();
+  })).catch(() => {});
+}
+function idbClavesDeStore(nombreStore) {
+  return abrirIDB().then((db) => new Promise((resolve, reject) => {
+    const req = db.transaction(nombreStore, "readonly").objectStore(nombreStore).getAllKeys();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error || new Error("Error al leer las claves"));
   }));
 }
 
@@ -181,11 +212,12 @@ function idbContarEnStore(nombreStore) {
 // proyecto — después, idbGuardarProyecto mantiene el índice solo.
 async function migrarIndiceProyectosSiHaceFalta() {
   try {
-    const [totalCompleto, totalIndice] = await Promise.all([
-      idbContarEnStore(IDB_STORE_PROYECTOS),
-      idbContarEnStore(IDB_STORE_INDICE),
+    const [clavesCompleto, clavesIndice] = await Promise.all([
+      idbClavesDeStore(IDB_STORE_PROYECTOS),
+      idbClavesDeStore(IDB_STORE_INDICE),
     ]);
-    if (totalIndice >= totalCompleto) return;
+    const enIndice = new Set(clavesIndice);
+    if (clavesCompleto.every((k) => enIndice.has(k))) return;
     const todos = await idbListarProyectos();
     const db = await abrirIDB();
     await new Promise((resolve, reject) => {
@@ -219,8 +251,11 @@ function idbLeerProyecto(id) {
 }
 function idbBorrarProyecto(id) {
   return abrirIDB().then((db) => new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE_PROYECTOS, "readwrite");
+    // Antes solo se borraba del store de proyectos y la entrada del índice liviano quedaba para siempre: como la
+    // lista se arma desde ese índice, el proyecto borrado "reaparecía" a los pocos segundos.
+    const tx = db.transaction([IDB_STORE_PROYECTOS, IDB_STORE_INDICE], "readwrite");
     tx.objectStore(IDB_STORE_PROYECTOS).delete(id);
+    tx.objectStore(IDB_STORE_INDICE).delete(id);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error || new Error("Error al borrar el proyecto"));
   }));

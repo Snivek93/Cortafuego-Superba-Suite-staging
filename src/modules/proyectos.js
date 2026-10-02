@@ -1871,7 +1871,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   // "Sincronizado antes" = este dispositivo llegó a sincronizar el proyecto con la nube. Si ya no está en
   // la nube, lo borró otra persona (o ya no tengo acceso): es una copia suelta que no debe volver a subirse.
   const sincronizados = new Set();
-  await Promise.all(conNombre.map(async (p) => { if ((await versionLocalSincronizada(p.id)) !== null) sincronizados.add(p.id); }));
+  await Promise.all(conNombre.concat(borradores).map(async (p) => { if ((await versionLocalSincronizada(p.id)) !== null) sincronizados.add(p.id); }));
   const zombis = new Set();
   if (nubeCompleta) conNombre.forEach((p) => { if (sincronizados.has(p.id) && !idsEnNube.has(p.id)) zombis.add(p.id); });
   const ctxLista = { user, enNube: idsEnNube, nubeCompleta, docs: docsRemotos, espacios: ESPACIOS, candados: candadosAjenosPorProyecto, permisos: permisoEdicionConocido, sincronizados, zombis };
@@ -2029,7 +2029,10 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
       return items;
     }
     if (tipo === "borrador") {
-      items.push({ i: n++, icono: "trash", texto: "Eliminar", peligro: true, accion: () => borrarProyectoOCarpeta(id, false, true) });
+      // Un borrador que nunca llegó a la nube se borra solo de este teléfono (antes intentaba borrarlo también
+      // de la nube, fallaba y avisaba "revisá tu conexión" sin que hubiera ningún problema).
+      const soloAqui = ctxLista.nubeCompleta && !ctxLista.docs[id] && !ctxLista.sincronizados.has(id);
+      items.push({ i: n++, icono: "trash", texto: "Eliminar", peligro: true, accion: () => borrarProyectoOCarpeta(id, false, true, soloAqui ? "local" : undefined) });
       return items;
     }
     const perm = permisosDeProyecto(id, ctxLista);
