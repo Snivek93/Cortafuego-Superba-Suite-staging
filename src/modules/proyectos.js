@@ -164,7 +164,9 @@ const ICONOS_PROYECTOS_SVG = '<svg id="proy-iconos-extra" xmlns="http://www.w3.o
   + '<symbol id="i-px-switch" viewBox="0 0 24 24"><path d="M4 8h15M15 4l4 4-4 4M20 16H5M9 12l-4 4 4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>'
   + '<symbol id="i-px-user-check" viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 19c0-3.3 2.7-5.2 6-5.2 1.6 0 3 .5 4 1.3M15 17.5l2 2 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>'
   + '<symbol id="i-px-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 7V4.5h4V7M6.5 7l1 12.5h9L17.5 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>'
-  + '<symbol id="i-px-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>'
+  + '<symbol id="i-px-folder" viewBox="0 0 24 24"><path d="M5 4h4l3 3h7a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2" fill="currentColor" fill-opacity=".14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>'
+  + '<symbol id="i-px-home" viewBox="0 0 24 24"><path d="M5 12H3l9-9 9 9h-2M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7M9 21v-6a2 2 0 012-2h2a2 2 0 012 2v6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>'
+  + '<symbol id="i-px-folder-open" viewBox="0 0 24 24"><path d="M5 19l2.757-7.351A1 1 0 018.693 11H21a1 1 0 01.986 1.164l-.996 5.211A2 2 0 0119.026 19H5a2 2 0 01-2-2V6a2 2 0 012-2h4l3 3h7a2 2 0 012 2v2" fill="currentColor" fill-opacity=".14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>'
   + '<symbol id="i-px-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>'
   + '</svg>';
 function asegurarIconosProyectos() {
@@ -444,7 +446,7 @@ function filaBorradorHTML(id, data) {
 function filaCarpetaHTML(carpeta, cantidad) {
   return `
     <div class="proy-carpeta-fila" data-id="${escapeHtml(carpeta.id)}" data-tipo="carpeta" data-buscar="${escapeHtml(normalizarBusqueda(carpeta.nombre))}">
-      <div class="proy-carpeta-tile"><svg class="icon"><use href="#i-folder"/></svg></div>
+      <div class="proy-carpeta-tile">${icoPx("folder")}</div>
       <div class="proy-carpeta-nombre">${escapeHtml(carpeta.nombre)}</div>
       <div class="proy-carpeta-cant">${cantidad}</div>
       <button type="button" class="proy-card-menu-btn" data-id="${escapeHtml(carpeta.id)}" data-tipo="carpeta" aria-label="Más opciones" aria-haspopup="menu">${icoPx("dots")}</button>
@@ -2115,7 +2117,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   const vacio = (!hayAlgoQueMostrar && !borradores.length)
     ? ((soloLocal && !REMOTO_COMPLETADO)
         ? `<div class="proy-cargando-spinner-wrap proy-cargando-skel" aria-hidden="true"><div class="proy-skel-card"><span></span><span></span></div><div class="proy-skel-card"><span></span><span></span></div><div class="proy-skel-card"><span></span><span></span></div></div>`
-        : `<div class="proy-vacio"><svg class="icon proy-vacio-icono"><use href="#i-folder"/></svg><p>Todavía no tenés proyectos.<br>Creá el primero con <span class="proy-solo-movil">el botón de abajo.</span><span class="proy-solo-desk">«Proyecto nuevo», arriba a la derecha.</span></p></div>`)
+        : `<div class="proy-vacio">${icoPx("folder", "proy-vacio-icono")}<p>Todavía no tenés proyectos.<br>Creá el primero con <span class="proy-solo-movil">el botón de abajo.</span><span class="proy-solo-desk">«Proyecto nuevo», arriba a la derecha.</span></p></div>`)
     : "";
   const accionablesPapelera = PAPELERA.filter((i) => i.puedeRestaurar || i.puedePurgar);
   const seccionPapelera = (enRaiz && accionablesPapelera.length)
@@ -2126,13 +2128,13 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   // --- Barra lateral (solo se ve en pantallas anchas; en el celular está oculta por CSS). Reutiliza el mismo
   // estado de carpetas y los mismos menús ⋯ que la lista: no hay lógica duplicada.
   const cantidadEnCarpeta = (cid) => conNombre.filter((p) => CARPETA_ASIGNACIONES[p.id] === cid).length;
-  const filaSide = (c, esSub) => `<div class="proy-side-fila${esSub ? " sub" : ""}${CARPETA_ACTIVA_ID === c.id ? " activa" : ""}"><button type="button" class="proy-side-item" data-side-carpeta="${escapeHtml(c.id)}">${icoPx("folder")}<span class="proy-side-nombre">${escapeHtml(c.nombre)}</span><span class="proy-side-cant">${cantidadEnCarpeta(c.id)}</span></button><button type="button" class="proy-card-menu-btn proy-side-menu" data-id="${escapeHtml(c.id)}" data-tipo="carpeta" aria-label="Más opciones de ${escapeHtml(c.nombre)}" aria-haspopup="menu">${icoPx("dots")}</button></div>`;
+  const filaSide = (c, esSub) => `<div class="proy-side-fila${esSub ? " sub" : ""}${CARPETA_ACTIVA_ID === c.id ? " activa" : ""}"><button type="button" class="proy-side-item" data-side-carpeta="${escapeHtml(c.id)}">${icoPx(CARPETA_ACTIVA_ID === c.id ? "folder-open" : "folder")}<span class="proy-side-nombre">${escapeHtml(c.nombre)}</span><span class="proy-side-cant">${cantidadEnCarpeta(c.id)}</span></button><button type="button" class="proy-card-menu-btn proy-side-menu" data-id="${escapeHtml(c.id)}" data-tipo="carpeta" aria-label="Más opciones de ${escapeHtml(c.nombre)}" aria-haspopup="menu">${icoPx("dots")}</button></div>`;
   const arbolSide = ordenarCarpetas(CARPETAS.filter((c) => !c.padreId), MODO_ORDEN)
     .map((c) => filaSide(c, false) + ordenarCarpetas(CARPETAS.filter((s) => s.padreId === c.id), MODO_ORDEN).map((s) => filaSide(s, true)).join(""))
     .join("");
   const sidebarHTML = `
     <aside class="proy-side" aria-label="Carpetas">
-      <div class="proy-side-fila${CARPETA_ACTIVA_ID ? "" : " activa"}"><button type="button" class="proy-side-item" data-side-carpeta=""><span class="proy-side-nombre">Inicio</span></button></div>
+      <div class="proy-side-fila${CARPETA_ACTIVA_ID ? "" : " activa"}"><button type="button" class="proy-side-item" data-side-carpeta="">${icoPx("home")}<span class="proy-side-nombre">Inicio</span></button></div>
       <p class="proy-side-titulo">Carpetas</p>
       ${arbolSide || `<p class="proy-side-vacio">Todavía no hay carpetas.</p>`}
       ${puedeCrearSubcarpeta ? `<button type="button" class="proy-side-accion" id="proy-side-nueva-carpeta"><svg class="icon"><use href="#i-plus"/></svg>Nueva carpeta</button>` : ""}
@@ -2584,7 +2586,7 @@ function mostrarAvisoSinConexionProyectos(overlay, permitirCerrar) {
   if (!spinnerWrap) return;
   spinnerWrap.outerHTML = `
     <div class="proy-vacio">
-      <svg class="icon proy-vacio-icono"><use href="#i-folder"/></svg>
+      ${icoPx("folder", "proy-vacio-icono")}
       <p>No se pudo conectar para revisar proyectos compartidos.<br>Si tenés proyectos guardados en este dispositivo deberían aparecer solos; si la lista sigue vacía, revisá tu conexión.</p>
       <button type="button" class="secondary" id="proy-btn-reintentar-sync" style="margin-top:10px;">Reintentar</button>
     </div>`;
