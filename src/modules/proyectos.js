@@ -2145,9 +2145,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   overlay.innerHTML = `
     <div class="proy-header-full">
       <div class="proy-header-full-left">
-        ${permitirCerrar
-          ? `<button type="button" class="proy-header-icon-btn" id="proy-btn-cerrar" title="Volver" aria-label="Volver"><svg class="icon"><use href="#i-arrow-left"/></svg></button>`
-          : `<div class="proy-header-mark-full"><img class="proy-header-mark-logo" src="icons/icon-192.png" alt="Firestop Suite" width="24" height="24" /></div>`}
+        <div class="proy-header-mark-full"><img class="proy-header-mark-logo" src="icons/icon-192.png" alt="Firestop Suite" width="24" height="24" /></div>
         <button type="button" class="espacio-selector-btn" id="proy-btn-espacio-selector" aria-label="Cambiar espacio">
           <div>
             <p class="proy-header-full-title">${escapeHtml(nombreEspacioActivo)}<svg class="icon icon-chevron-down"><use href="#i-chevron-down"/></svg></p>
