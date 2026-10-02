@@ -1329,7 +1329,7 @@ button.primary:not(:disabled):active, button.secondary:not(:disabled):active, bu
 }
 
 /* Íconos de carpeta: un poco más grandes y con cuerpo suave (antes quedaban chicos y apagados dentro del recuadro). */
-.proy-carpeta-tile .icon { width: 19px; height: 19px; }
+.proy-carpeta-tile .icon { width: 19px; height: 19px; margin: 0; }
 .proy-side-item .icon { width: 18px; height: 18px; }
 .proy-side-fila.activa .proy-side-item .icon { color: var(--hilti-red); }
 .proy-vacio-icono { width: 44px; height: 44px; }
