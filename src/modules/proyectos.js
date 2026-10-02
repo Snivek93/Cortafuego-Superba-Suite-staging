@@ -181,6 +181,44 @@ function normalizarBusqueda(s) {
 }
 
 // ---- Menú flotante ⋯ (uno solo para toda la pantalla; se posiciona junto al botón que lo abrió)
+// ---- Movimiento (animaciones de la pantalla de Proyectos)
+// Entrada orquestada: un solo momento (la lista entra escalonada) al abrir la pantalla, cambiar de carpeta
+// o de orden. Se hace con Web Animations sobre los elementos recién pintados, así un redibujo posterior
+// (cuando llegan los datos de la nube) NO la repite. Respeta "reducir movimiento".
+let ANIMAR_ENTRADA_PROYECTOS = false;
+function movimientoReducido() {
+  try { return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); } catch (e) { return false; }
+}
+let ULTIMA_ENTRADA_PROYECTOS_MS = 0;
+function animarEntradaProyectos(overlay, transcurridoMs) {
+  if (movimientoReducido() || !overlay) return;
+  const ya = transcurridoMs || 0;
+  const els = Array.from(overlay.querySelectorAll(".proy-main .proy-card, .proy-main .proy-carpeta-fila, .proy-main .proy-sec-label")).slice(0, 14);
+  els.forEach((el, i) => {
+    if (!el.animate) return;
+    el.animate(
+      [{ opacity: 0, transform: "translateY(8px)" }, { opacity: 1, transform: "none" }],
+      { duration: 260, delay: i * 28 - ya, easing: "cubic-bezier(0.22,0.61,0.36,1)", fill: "backwards" }
+    );
+  });
+}
+// Salida de una tarjeta (al borrarla): se encoge y se desvanece, y recién ahí se quita del DOM.
+function salirTarjetaProyecto(el) {
+  if (!el || !el.animate || movimientoReducido()) { if (el) el.remove(); return; }
+  const h = el.offsetHeight;
+  el.style.pointerEvents = "none";
+  el.style.overflow = "hidden";
+  const a = el.animate(
+    [
+      { opacity: 1, transform: "scale(1)", maxHeight: h + "px" },
+      { opacity: 0, transform: "scale(0.97)", maxHeight: "0px", paddingTop: "0px", paddingBottom: "0px", marginTop: "0px", marginBottom: "0px", borderWidth: "0px" }
+    ],
+    { duration: 220, easing: "cubic-bezier(0.4,0,1,1)", fill: "forwards" }
+  );
+  a.onfinish = () => el.remove();
+  a.oncancel = () => el.remove();
+}
+
 function cerrarMenuFlotante() {
   const m = document.getElementById("proy-menu-flotante");
   if (m) m.remove();
@@ -797,7 +835,7 @@ function moverAPapelera(id) {
       return;
     }
     PROYECTOS_BORRANDO.add(id);
-    document.querySelectorAll('#pantalla-proyectos .proy-card[data-id="' + id.replace(/"/g, "") + '"]').forEach((el) => el.remove());
+    document.querySelectorAll('#pantalla-proyectos .proy-card[data-id="' + id.replace(/"/g, "") + '"]').forEach((el) => salirTarjetaProyecto(el));
     try {
       await enviarAPapelera(id);
     } catch (err) {
@@ -1616,7 +1654,7 @@ function borrarProyectoOCarpeta(id, esCarpeta, esPropio, modo) {
       return;
     }
     PROYECTOS_BORRANDO.add(id);
-    document.querySelectorAll('#pantalla-proyectos .proy-card[data-id="' + id.replace(/"/g, "") + '"]').forEach((el) => el.remove());
+    document.querySelectorAll('#pantalla-proyectos .proy-card[data-id="' + id.replace(/"/g, "") + '"]').forEach((el) => salirTarjetaProyecto(el));
     const eraActivo = (id === window.PROYECTO_ACTIVO_ID);
     if (eraActivo) {
       // Se suelta de inmediato: así ningún autoguardado ni sincronización pendiente puede volver a
@@ -1630,9 +1668,13 @@ function borrarProyectoOCarpeta(id, esCarpeta, esPropio, modo) {
     accionMoverProyecto(id, null);
     const user = window.usuarioActual ? window.usuarioActual() : null;
     const terminarLimpieza = () => {
-      PROYECTOS_BORRANDO.delete(id);
-      const ov = document.getElementById("pantalla-proyectos");
-      if (ov && !ov.hidden) renderPantallaProyectos(ULTIMO_PERMITIR_CERRAR);
+      const cerrarLimpieza = () => {
+        PROYECTOS_BORRANDO.delete(id);
+        const ov = document.getElementById("pantalla-proyectos");
+        if (ov && !ov.hidden) renderPantallaProyectos(ULTIMO_PERMITIR_CERRAR);
+      };
+      // 240 ms: lo que dura la animación de salida de la tarjeta (ver salirTarjetaProyecto).
+      if (movimientoReducido()) cerrarLimpieza(); else setTimeout(cerrarLimpieza, 240);
     };
     if (user && modo !== "local" && modo !== "zombi") {
       (async () => {
@@ -1906,7 +1948,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
     ? `<p class="proy-sec-label">Recientes</p><div class="proy-lista">${recientes.map((p) => tarjetaProyectoNuevaHTML(p.id, p.data, ctxLista, { mostrarCarpeta: true })).join("")}</div>`
     : "";
   const seccionCarpetas = carpetasOrdenadas.length
-    ? `<p class="proy-sec-label">${carpetaActiva ? "Subcarpetas" : "Carpetas"}</p><div class="proy-grupo">${carpetasOrdenadas.map((c) => filaCarpetaHTML(c, conNombre.filter((p) => CARPETA_ASIGNACIONES[p.id] === c.id).length)).join("")}</div>`
+    ? `<div class="proy-sec-carpetas"><p class="proy-sec-label">${carpetaActiva ? "Subcarpetas" : "Carpetas"}</p><div class="proy-grupo">${carpetasOrdenadas.map((c) => filaCarpetaHTML(c, conNombre.filter((p) => CARPETA_ASIGNACIONES[p.id] === c.id).length)).join("")}</div></div>`
     : "";
   const etiquetaProyectos = carpetaActiva ? "Proyectos" : ((carpetasOrdenadas.length || mostrarRecientes) ? "Sin carpeta" : "Tus proyectos");
   const seccionProyectos = proyectosOrdenados.length
@@ -1926,14 +1968,31 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   // se muestra en el pase remoto (soloLocal=false), cuando ya se confirmó que de verdad no hay nada.
   const vacio = (!hayAlgoQueMostrar && !borradores.length)
     ? (soloLocal
-        ? `<div class="proy-cargando-spinner-wrap" aria-hidden="true"><div class="proy-cargando-spinner"></div><span>Cargando proyectos…</span></div>`
-        : `<div class="proy-vacio"><svg class="icon proy-vacio-icono"><use href="#i-folder"/></svg><p>Todavía no tenés proyectos.<br>Creá el primero con el botón de abajo.</p></div>`)
+        ? `<div class="proy-cargando-spinner-wrap proy-cargando-skel" aria-hidden="true"><div class="proy-skel-card"><span></span><span></span></div><div class="proy-skel-card"><span></span><span></span></div><div class="proy-skel-card"><span></span><span></span></div></div>`
+        : `<div class="proy-vacio"><svg class="icon proy-vacio-icono"><use href="#i-folder"/></svg><p>Todavía no tenés proyectos.<br>Creá el primero con <span class="proy-solo-movil">el botón de abajo.</span><span class="proy-solo-desk">«Proyecto nuevo», arriba a la derecha.</span></p></div>`)
     : "";
   const accionablesPapelera = PAPELERA.filter((i) => i.puedeRestaurar || i.puedePurgar);
   const seccionPapelera = (enRaiz && accionablesPapelera.length)
     ? `<button type="button" id="proy-papelera-btn" style="display:flex;align-items:center;gap:8px;width:100%;max-width:560px;margin-top:10px;border:1px dashed var(--border);border-radius:12px;padding:11px 12px;font-size:var(--fs-sm);color:var(--text-secondary);cursor:pointer;background:transparent;font-family:inherit;text-align:left;">${icoPx("trash")}<span style="flex:1;">Papelera · ${accionablesPapelera.length}</span><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>`
     : "";
   const cuerpoHTML = `${buscadorHTML}<div id="proy-vista-normal">${filaControles}${seccionRecientes}${seccionCarpetas}${seccionProyectos}${seccionBorradores}${seccionPapelera}${vacio}</div>${resultadosBusqueda}`;
+
+  // --- Barra lateral (solo se ve en pantallas anchas; en el celular está oculta por CSS). Reutiliza el mismo
+  // estado de carpetas y los mismos menús ⋯ que la lista: no hay lógica duplicada.
+  const cantidadEnCarpeta = (cid) => conNombre.filter((p) => CARPETA_ASIGNACIONES[p.id] === cid).length;
+  const filaSide = (c, esSub) => `<div class="proy-side-fila${esSub ? " sub" : ""}${CARPETA_ACTIVA_ID === c.id ? " activa" : ""}"><button type="button" class="proy-side-item" data-side-carpeta="${escapeHtml(c.id)}">${icoPx("folder")}<span class="proy-side-nombre">${escapeHtml(c.nombre)}</span><span class="proy-side-cant">${cantidadEnCarpeta(c.id)}</span></button><button type="button" class="proy-card-menu-btn proy-side-menu" data-id="${escapeHtml(c.id)}" data-tipo="carpeta" aria-label="Más opciones de ${escapeHtml(c.nombre)}" aria-haspopup="menu">${icoPx("dots")}</button></div>`;
+  const arbolSide = ordenarCarpetas(CARPETAS.filter((c) => !c.padreId), MODO_ORDEN)
+    .map((c) => filaSide(c, false) + ordenarCarpetas(CARPETAS.filter((s) => s.padreId === c.id), MODO_ORDEN).map((s) => filaSide(s, true)).join(""))
+    .join("");
+  const sidebarHTML = `
+    <aside class="proy-side" aria-label="Carpetas">
+      <div class="proy-side-fila${CARPETA_ACTIVA_ID ? "" : " activa"}"><button type="button" class="proy-side-item" data-side-carpeta=""><span class="proy-side-nombre">Inicio</span></button></div>
+      <p class="proy-side-titulo">Carpetas</p>
+      ${arbolSide || `<p class="proy-side-vacio">Todavía no hay carpetas.</p>`}
+      ${puedeCrearSubcarpeta ? `<button type="button" class="proy-side-accion" id="proy-side-nueva-carpeta"><svg class="icon"><use href="#i-plus"/></svg>Nueva carpeta</button>` : ""}
+      ${accionablesPapelera.length ? `<button type="button" class="proy-side-accion proy-side-papelera" id="proy-side-papelera">${icoPx("trash")}<span>Papelera</span><span class="proy-side-cant">${accionablesPapelera.length}</span></button>` : ""}
+    </aside>`;
+  const tituloMain = `<h2 class="proy-main-titulo">${escapeHtml(carpetaActiva ? carpetaActiva.nombre : "Inicio")}</h2>`;
 
   overlay.innerHTML = `
     <div class="proy-header-full">
@@ -1948,14 +2007,22 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
           </div>
         </button>
       </div>
+      <div class="proy-header-desk-actions">
+        <button type="button" class="proy-hdr-btn" id="proy-hdr-abrir"><svg class="icon"><use href="#i-upload"/></svg>Abrir archivo</button>
+        <button type="button" class="proy-hdr-btn primario" id="proy-hdr-nuevo"><svg class="icon"><use href="#i-plus"/></svg>Proyecto nuevo</button>
+      </div>
       <button type="button" class="proy-avatar-btn" id="proy-btn-avatar" aria-label="Cuenta">${escapeHtml(window.iniciales && window.usuarioActual ? window.iniciales(window.usuarioActual()) : "?")}</button>
       ${dropdownEspacioHTML()}
       ${popupCuentaHTML()}
     </div>
     <div class="proy-body-full">
       <div class="proy-body-full-inner">
-        ${breadcrumb}
-        ${cuerpoHTML}
+        ${sidebarHTML}
+        <div class="proy-main">
+          ${breadcrumb}
+          ${tituloMain}
+          ${cuerpoHTML}
+        </div>
       </div>
     </div>
     <div class="proy-fab-wrap">
@@ -1966,6 +2033,14 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
       <button type="button" class="proy-fab" id="proy-btn-nuevo" aria-label="Nuevo proyecto o abrir archivo"><svg class="icon"><use href="#i-plus"/></svg></button>
       <input type="file" id="proy-fab-input-abrir" accept=".fss,.json,application/json,application/octet-stream,text/plain" style="display:none" />
     </div>`;
+
+  if (ANIMAR_ENTRADA_PROYECTOS) {
+    ANIMAR_ENTRADA_PROYECTOS = false;
+    ULTIMA_ENTRADA_PROYECTOS_MS = Date.now();
+    animarEntradaProyectos(overlay, 0);
+  } else if (Date.now() - ULTIMA_ENTRADA_PROYECTOS_MS < 500) {
+    animarEntradaProyectos(overlay, Date.now() - ULTIMA_ENTRADA_PROYECTOS_MS);
+  }
 
   // --- Buscador
   const inputBuscar = document.getElementById("proy-buscador");
@@ -2012,6 +2087,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
     fila.addEventListener("click", (e) => {
       if (e.target.closest(".proy-card-menu-btn")) return;
       CARPETA_ACTIVA_ID = fila.getAttribute("data-id");
+      ANIMAR_ENTRADA_PROYECTOS = true;
       renderPantallaProyectos(permitirCerrar);
     });
   });
@@ -2088,6 +2164,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
     btn.addEventListener("click", () => {
       MODO_ORDEN = btn.getAttribute("data-orden");
       guardarModoOrden();
+      ANIMAR_ENTRADA_PROYECTOS = true;
       renderPantallaProyectos(permitirCerrar);
     });
   });
@@ -2097,10 +2174,28 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   const btnVolverCarpeta = document.getElementById("proy-btn-volver-carpeta");
   if (btnVolverCarpeta) btnVolverCarpeta.addEventListener("click", () => {
     CARPETA_ACTIVA_ID = carpetaActiva ? (carpetaActiva.padreId || null) : null;
+    ANIMAR_ENTRADA_PROYECTOS = true;
     renderPantallaProyectos(permitirCerrar);
   });
   const btnPapelera = document.getElementById("proy-papelera-btn");
   if (btnPapelera) btnPapelera.addEventListener("click", abrirModalPapelera);
+
+  // --- Pantallas anchas: barra lateral y botones del header (usan los mismos flujos del botón + del celular)
+  overlay.querySelectorAll("[data-side-carpeta]").forEach((b) => b.addEventListener("click", () => {
+    const destino = b.getAttribute("data-side-carpeta") || null;
+    if (destino === CARPETA_ACTIVA_ID) return;
+    CARPETA_ACTIVA_ID = destino;
+    ANIMAR_ENTRADA_PROYECTOS = true;
+    renderPantallaProyectos(permitirCerrar);
+  }));
+  const sideNuevaCarpeta = document.getElementById("proy-side-nueva-carpeta");
+  if (sideNuevaCarpeta) sideNuevaCarpeta.addEventListener("click", () => abrirModalNuevaCarpeta(CARPETA_ACTIVA_ID));
+  const sidePapelera = document.getElementById("proy-side-papelera");
+  if (sidePapelera) sidePapelera.addEventListener("click", abrirModalPapelera);
+  const hdrNuevo = document.getElementById("proy-hdr-nuevo");
+  if (hdrNuevo) hdrNuevo.addEventListener("click", () => { const b = document.getElementById("proy-fab-menu-nuevo"); if (b) b.click(); });
+  const hdrAbrir = document.getElementById("proy-hdr-abrir");
+  if (hdrAbrir) hdrAbrir.addEventListener("click", () => { const b = document.getElementById("proy-fab-menu-abrir"); if (b) b.click(); });
   const detBorradores = document.getElementById("proy-borradores");
   if (detBorradores) detBorradores.addEventListener("toggle", () => { BORRADORES_ABIERTO = detBorradores.open; });
 
@@ -2278,6 +2373,7 @@ async function mostrarPantallaProyectos() {
     window.soltarCandadoActivoSiHaceFalta();
   }
   const hayProyectoAbierto = !!window.PROYECTO_ACTIVO_ID;
+  ANIMAR_ENTRADA_PROYECTOS = true;
   await renderPantallaProyectos(hayProyectoAbierto, true);
   const overlay = document.getElementById("pantalla-proyectos");
   overlay.hidden = false;

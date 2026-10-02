@@ -1410,7 +1410,7 @@ async function compartirPlanoActual() {
   const file = new File([blob], archivo, { type: "application/pdf" });
 
   try {
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    if (window.prefiereCompartirArchivos && window.prefiereCompartirArchivos() && navigator.canShare && navigator.canShare({ files: [file] })) {
       await navigator.share({ files: [file], title: plano.nombre, text: `Plano: ${plano.nombre}` });
       mostrarToast("Plano compartido.");
       return;
@@ -1425,7 +1425,7 @@ async function compartirPlanoActual() {
   a.href = url; a.download = archivo;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
-  mostrarToast("Este navegador no permite compartir directo — se descargó el PDF.");
+  mostrarToast(window.prefiereCompartirArchivos && window.prefiereCompartirArchivos() ? "Este navegador no permite compartir directo — se descargó el PDF." : "PDF descargado.");
 }
 
 // Dibuja el plano + sus trazos/pines en un canvas temporal (para que el PDF

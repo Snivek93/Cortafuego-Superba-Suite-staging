@@ -505,13 +505,26 @@ function construirReportePDF(opciones) {
 // antes tenía el botón "Compartir" del header, pero ahora vive en cada ítem
 // del menú PDF, compartiendo/descargando exactamente el PDF que se tocó.
 // `fuente` puede ser un doc de jsPDF (tiene .output) o ya un Blob (pdf-lib).
+// "Compartir" (menú nativo) solo tiene sentido en celular/tablet. Chrome/Edge en PC también aceptan
+// navigator.canShare con archivos y abrían el diálogo de compartir en vez de descargar el PDF.
+// Táctil primario (iPhone, iPad, Android, pointer:coarse) → compartir. PC con mouse → descarga directa.
+function prefiereCompartirArchivos() {
+  try {
+    const ua = navigator.userAgent || "";
+    if (/Android|iP(hone|ad|od)/i.test(ua)) return true;
+    if (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) return true; // iPadOS
+    // Táctil de verdad: puntero principal tosco Y sin hover. Una PC con mouse (aunque tenga pantalla táctil) descarga.
+    return !!(window.matchMedia && window.matchMedia("(pointer: coarse) and (hover: none)").matches);
+  } catch (e) { return false; }
+}
+
 async function compartirODescargarPDF(fuente, filename, opts) {
   const blob = (fuente instanceof Blob) ? fuente : fuente.output("blob");
   const titulo = (opts && opts.titulo) || filename;
   const texto = (opts && opts.texto) || "";
   try {
     const file = new File([blob], filename, { type: "application/pdf" });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    if (prefiereCompartirArchivos() && navigator.canShare && navigator.canShare({ files: [file] })) {
       await navigator.share({ files: [file], title: titulo, text: texto });
       mostrarToast("PDF compartido.");
       return;
@@ -558,4 +571,5 @@ window.dibujarNumeroPaginaPDF = dibujarNumeroPaginaPDF;
 window.construirReportePDF = construirReportePDF;
 window.descargarPDF = descargarPDF;
 window.compartirODescargarPDF = compartirODescargarPDF;
+window.prefiereCompartirArchivos = prefiereCompartirArchivos;
 })();
