@@ -189,6 +189,97 @@ let ANIMAR_ENTRADA_PROYECTOS = false;
 function movimientoReducido() {
   try { return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); } catch (e) { return false; }
 }
+// ---- Foto de la nube (lo último que dijo Firestore) -------------------------------------------------
+// Sirve para dos cosas: (1) moverse entre carpetas / cambiar el orden SIN volver a pedir nada a la red
+// (antes cada toque esperaba una ronda completa de Firestore antes de dibujar), y (2) pintar las etiquetas
+// (Compartido, Solo lectura...) ya en el primer cuadro al abrir la app, en vez de que aparezcan de golpe
+// cuando llega la respuesta. Lo que se afirma desde una foto vieja se limita: ver obtenerSnapshotNube.
+let SNAP_NUBE = null;
+let SNAP_NUBE_FIRMA = "";
+let SNAP_NUBE_GUARDADA_MS = 0;
+let REMOTO_COMPLETADO = false;
+const SNAP_CONFIABLE_MS = 10 * 60 * 1000;   // pasado esto no se afirma "Solo en este teléfono" ni "Ya no está en la nube"
+const SNAP_CANDADO_MS = 4 * 60 * 1000;      // un candado vence a los 5 min: más viejo que esto no se muestra
+function claveSnapNube(user) { return user.uid + ":" + (ESPACIO_ACTIVO_ID || "u"); }
+async function obtenerSnapshotNube(user) {
+  const clave = claveSnapNube(user);
+  if (SNAP_NUBE && SNAP_NUBE.clave === clave) return SNAP_NUBE;
+  if (!window.idbLeerMetaClave) return null;
+  try {
+    const g = await window.idbLeerMetaClave("snapNube:" + user.uid);
+    if (g && g.clave === clave && g.docs) { SNAP_NUBE = g; return g; }
+  } catch (e) { /* sin foto: se dibuja como antes */ }
+  return null;
+}
+function guardarSnapshotNube(user, d) {
+  const docs = {};
+  Object.keys(d.docs).forEach((id) => {
+    const x = d.docs[id] || {};
+    docs[id] = { id, ownerId: x.ownerId || null, espacioId: x.espacioId || null, editoresUids: Array.isArray(x.editoresUids) ? x.editoresUids.slice() : [], eliminadoEn: marcaDeTiempoMs(x.eliminadoEn) || null, nombre: x.nombre || "" };
+  });
+  const base = { clave: claveSnapNube(user), docs, enNube: Array.from(d.enNube), permisos: Object.assign({}, d.permisos), candados: Object.assign({}, d.candados), nubeCompleta: !!d.nubeCompleta };
+  SNAP_NUBE = Object.assign({ ts: Date.now() }, base);
+  const firma = JSON.stringify(base);
+  // Se guarda en el dispositivo solo si cambió (o si la copia ya tiene más de 5 min): así no se escribe en cada redibujo.
+  if (window.idbGuardarMetaClave && (firma !== SNAP_NUBE_FIRMA || Date.now() - SNAP_NUBE_GUARDADA_MS > 5 * 60 * 1000)) {
+    SNAP_NUBE_FIRMA = firma; SNAP_NUBE_GUARDADA_MS = Date.now();
+    window.idbGuardarMetaClave("snapNube:" + user.uid, SNAP_NUBE).catch(() => {});
+  }
+}
+
+// ---- Miembros del espacio: copia local + precarga ----------------------------------------------------
+// "Ver miembros" y "Permisos" llaman a una Cloud Function (listarMiembrosEspacio). Esa llamada es lenta (arranque
+// en frío + consulta de cada cuenta), así que: se precarga en segundo plano al abrir la lista, se guarda una copia
+// y las ventanas la muestran al instante mientras se refresca.
+const MIEMBROS_CACHE = {};
+const MIEMBROS_EN_CURSO = {};
+const MIEMBROS_FRESCO_MS = 10 * 60 * 1000;
+function claveMiembros(espacioId) {
+  const u = window.usuarioActual ? window.usuarioActual() : null;
+  return u ? "miembrosEspacio:" + u.uid + ":" + espacioId : null;
+}
+async function leerMiembrosGuardados(espacioId) {
+  if (MIEMBROS_CACHE[espacioId]) return MIEMBROS_CACHE[espacioId];
+  const k = claveMiembros(espacioId);
+  if (!k || !window.idbLeerMetaClave) return null;
+  try {
+    const reg = await window.idbLeerMetaClave(k);
+    if (reg && Array.isArray(reg.miembros)) { MIEMBROS_CACHE[espacioId] = reg; return reg; }
+  } catch (e) { /* sin copia */ }
+  return null;
+}
+function pedirMiembrosEspacio(espacioId) {
+  if (MIEMBROS_EN_CURSO[espacioId]) return MIEMBROS_EN_CURSO[espacioId];
+  const p = Promise.resolve().then(() => window.fsListarMiembrosEspacio(espacioId)).then((miembros) => {
+    const reg = { miembros: miembros || [], ts: Date.now() };
+    MIEMBROS_CACHE[espacioId] = reg;
+    const k = claveMiembros(espacioId);
+    if (k && window.idbGuardarMetaClave) window.idbGuardarMetaClave(k, reg).catch(() => {});
+    return reg.miembros;
+  }).finally(() => { delete MIEMBROS_EN_CURSO[espacioId]; });
+  MIEMBROS_EN_CURSO[espacioId] = p;
+  return p;
+}
+// Para pantallas que necesitan la lista ya (Permisos): usa la copia si es reciente; si no, la pide. Si la red falla y
+// hay copia, usa la copia.
+async function miembrosParaUsar(espacioId, maxEdadMs) {
+  const reg = await leerMiembrosGuardados(espacioId);
+  if (reg && Date.now() - reg.ts < maxEdadMs) return reg.miembros;
+  try { return await pedirMiembrosEspacio(espacioId); }
+  catch (e) { if (reg) return reg.miembros; throw e; }
+}
+function programarPrecargaMiembros() {
+  if (!ESPACIO_ACTIVO_ID || !window.fsListarMiembrosEspacio || !navigator.onLine) return;
+  const id = ESPACIO_ACTIVO_ID;
+  setTimeout(async () => {
+    try {
+      const reg = await leerMiembrosGuardados(id);
+      if (reg && Date.now() - reg.ts < MIEMBROS_FRESCO_MS) return;
+      await pedirMiembrosEspacio(id);
+    } catch (e) { /* precarga: si falla, se pedirá al abrir la ventana */ }
+  }, 2500);
+}
+
 let ULTIMA_ENTRADA_PROYECTOS_MS = 0;
 function animarEntradaProyectos(overlay, transcurridoMs) {
   if (movimientoReducido() || !overlay) return;
@@ -1270,7 +1361,7 @@ function abrirModalMiembrosEspacio(espacioId, nombreEspacio) {
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay || e.target.dataset.act === "cancel") overlay.remove();
   });
-  window.fsListarMiembrosEspacio(espacioId).then((miembros) => {
+  const pintarMiembros = (miembros) => {
     const cont = document.getElementById("proy-miembros-lista");
     if (!cont) return; // el modal ya se cerró antes de que llegara la respuesta
     if (!miembros.length) {
@@ -1284,7 +1375,27 @@ function abrirModalMiembrosEspacio(espacioId, nombreEspacio) {
           ${m.nombre && m.email ? `<p class="invitacion-espacio-sub">${escapeHtml(m.email)}</p>` : ""}
         </div>
       </div>`).join("");
+  };
+  // Mientras no hay nada que mostrar: tantos renglones de carga como miembros tiene el espacio (ya se sabe el número).
+  const espInfo = ESPACIOS.find((e) => e.id === espacioId);
+  const cuantos = Math.min(6, Math.max(1, espInfo && Array.isArray(espInfo.miembrosUids) ? espInfo.miembrosUids.length : 2));
+  const contInicial = document.getElementById("proy-miembros-lista");
+  if (contInicial) contInicial.innerHTML = Array.from({ length: cuantos }, () => '<div class="proy-skel-card" style="margin-bottom:8px;"><span></span><span></span></div>').join("");
+  // Copia local al instante + refresco: lo que llegue de la red solo redibuja si cambió algo.
+  let firmaPintada = "", llegoDeRed = false;
+  const pintarSiCambio = (miembros) => {
+    const f = JSON.stringify(miembros);
+    if (f === firmaPintada) return;
+    firmaPintada = f; pintarMiembros(miembros);
+  };
+  leerMiembrosGuardados(espacioId).then((reg) => {
+    if (reg && !llegoDeRed) pintarSiCambio(reg.miembros);
+    // Si la copia tiene menos de 1 min (la precarga acaba de traerla) no hace falta volver a pedirla.
+    if (reg && Date.now() - reg.ts < 60 * 1000) { llegoDeRed = true; return; }
+    return pedirMiembrosEspacio(espacioId).then((miembros) => { llegoDeRed = true; pintarSiCambio(miembros); });
   }).catch((e) => {
+    // Si ya hay una lista (la copia), no se tapa con un error: solo falló el refresco.
+    if (firmaPintada) return;
     const cont = document.getElementById("proy-miembros-lista");
     if (cont) cont.innerHTML = `<p class="auth-error">No se pudo cargar: ${escapeHtml(e && e.message ? e.message : "revisá tu conexión.")}</p>`;
   });
@@ -1338,7 +1449,7 @@ function abrirModalPermisosProyecto(proyectoId, nombreProyecto, espacioId) {
     }
   });
   Promise.all([
-    window.fsListarMiembrosEspacio(espacioId),
+    miembrosParaUsar(espacioId, 2 * 60 * 1000),
     window.fsObtenerEditoresProyecto(proyectoId),
   ]).then(([miembros, editoresUids]) => {
     const cont = document.getElementById("proy-permisos-lista");
@@ -1773,6 +1884,24 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
     candadosAjenosPorProyecto[doc.id] = c.nombre || "Otra persona";
   }
 
+  // Pase sin red (primer pintado o navegación): se reusa la última foto de la nube para que las etiquetas
+  // (Compartido, Solo lectura, ...) salgan desde el primer cuadro. Lo que podría estar viejo se limita: los
+  // candados ajenos solo si la foto es de hace menos de 4 min, y "Solo en este teléfono" / "Ya no está en la
+  // nube" solo si es de hace menos de 10 min (si no, esas dos esperan a la respuesta real).
+  let hidratado = false;
+  if (soloLocal && user) {
+    const snap = await obtenerSnapshotNube(user);
+    if (snap) {
+      const edad = Date.now() - snap.ts;
+      Object.assign(docsRemotos, snap.docs);
+      (snap.enNube || []).forEach((id) => idsEnNube.add(id));
+      Object.assign(permisoEdicionConocido, snap.permisos || {});
+      if (edad < SNAP_CANDADO_MS) Object.assign(candadosAjenosPorProyecto, snap.candados || {});
+      if (snap.nubeCompleta && edad < SNAP_CONFIABLE_MS) nubeCompleta = true;
+      hidratado = true;
+    }
+  }
+
   if (!soloLocal && user && prefetch && prefetch.conmigo) {
     try {
       const resConmigo = await prefetch.conmigo;
@@ -1852,6 +1981,11 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   }
 
   if (!soloLocal) guardarEspacioPorProyectoLocal();
+  if (!soloLocal) {
+    REMOTO_COMPLETADO = true;
+    if (user) guardarSnapshotNube(user, { docs: docsRemotos, enNube: idsEnNube, permisos: permisoEdicionConocido, candados: candadosAjenosPorProyecto, nubeCompleta });
+    programarPrecargaMiembros();
+  }
 
   // Papelera: proyectos que alguien mandó a la papelera (de este espacio o de Propio). También se esconden
   // las copias que este dispositivo todavía tenga de ellos. En el pase local (sin datos de la nube) se
@@ -1869,6 +2003,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
     if (nubeCompleta) purgarEnSegundoPlano(PAPELERA.filter((i) => i.puedePurgar && diasDesde(i.eliminadoMs) >= DIAS_PAPELERA).map((i) => i.id));
   }
 
+  if (soloLocal && hidratado) lista = lista.filter((p) => !(docsRemotos[p.id] && docsRemotos[p.id].eliminadoEn));
   const conNombreTodos = [];
   const borradoresTodos = [];
   lista.forEach(({ id, data }) => {
@@ -1967,7 +2102,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   // al usuario por unos segundos. En vez de eso, un esqueleto de carga; el mensaje real de "vacío" solo
   // se muestra en el pase remoto (soloLocal=false), cuando ya se confirmó que de verdad no hay nada.
   const vacio = (!hayAlgoQueMostrar && !borradores.length)
-    ? (soloLocal
+    ? ((soloLocal && !REMOTO_COMPLETADO)
         ? `<div class="proy-cargando-spinner-wrap proy-cargando-skel" aria-hidden="true"><div class="proy-skel-card"><span></span><span></span></div><div class="proy-skel-card"><span></span><span></span></div><div class="proy-skel-card"><span></span><span></span></div></div>`
         : `<div class="proy-vacio"><svg class="icon proy-vacio-icono"><use href="#i-folder"/></svg><p>Todavía no tenés proyectos.<br>Creá el primero con <span class="proy-solo-movil">el botón de abajo.</span><span class="proy-solo-desk">«Proyecto nuevo», arriba a la derecha.</span></p></div>`)
     : "";
@@ -2088,7 +2223,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
       if (e.target.closest(".proy-card-menu-btn")) return;
       CARPETA_ACTIVA_ID = fila.getAttribute("data-id");
       ANIMAR_ENTRADA_PROYECTOS = true;
-      renderPantallaProyectos(permitirCerrar);
+      renderPantallaProyectos(permitirCerrar, true);
     });
   });
 
@@ -2165,7 +2300,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
       MODO_ORDEN = btn.getAttribute("data-orden");
       guardarModoOrden();
       ANIMAR_ENTRADA_PROYECTOS = true;
-      renderPantallaProyectos(permitirCerrar);
+      renderPantallaProyectos(permitirCerrar, true);
     });
   });
 
@@ -2175,7 +2310,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
   if (btnVolverCarpeta) btnVolverCarpeta.addEventListener("click", () => {
     CARPETA_ACTIVA_ID = carpetaActiva ? (carpetaActiva.padreId || null) : null;
     ANIMAR_ENTRADA_PROYECTOS = true;
-    renderPantallaProyectos(permitirCerrar);
+    renderPantallaProyectos(permitirCerrar, true);
   });
   const btnPapelera = document.getElementById("proy-papelera-btn");
   if (btnPapelera) btnPapelera.addEventListener("click", abrirModalPapelera);
@@ -2186,7 +2321,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
     if (destino === CARPETA_ACTIVA_ID) return;
     CARPETA_ACTIVA_ID = destino;
     ANIMAR_ENTRADA_PROYECTOS = true;
-    renderPantallaProyectos(permitirCerrar);
+    renderPantallaProyectos(permitirCerrar, true);
   }));
   const sideNuevaCarpeta = document.getElementById("proy-side-nueva-carpeta");
   if (sideNuevaCarpeta) sideNuevaCarpeta.addEventListener("click", () => abrirModalNuevaCarpeta(CARPETA_ACTIVA_ID));
