@@ -284,6 +284,7 @@ function abrirEditarPerfil() {
       btn.disabled = true;
       try {
         await user.updateProfile({ displayName: apellido ? `${nombre} ${apellido}` : nombre });
+        if (window.guardarIdentidadLocal) window.guardarIdentidadLocal(user);
         actualizarUICuenta();
         if (window.actualizarCuentaProyectos) window.actualizarCuentaProyectos();
         overlay.remove();
@@ -319,6 +320,10 @@ let _yaResolvido = false;
 
 function resolverConUsuario(user) {
   ocultarOverlay();
+  // Se recuerda la cuenta verificada de este dispositivo: con ella initApp() puede
+  // abrir la app con los datos locales si en un arranque futuro Auth tarda en
+  // contestar por mala señal (ver arranque-offline.js). Nunca se guarda la contraseña.
+  if (window.guardarIdentidadLocal) window.guardarIdentidadLocal(user);
   if (!_yaResolvido) {
     _yaResolvido = true;
     // Se guarda la promesa (no se ignora) para que la Pantalla de Proyectos
@@ -412,6 +417,11 @@ async function resolverInvitacionesSiHaceFalta(user) {
 }
 
 firebase.auth().onAuthStateChanged((user) => {
+  // Sin sesión verificada (cerró sesión, expiró, usuario deshabilitado o correo
+  // sin verificar) ya no vale la identidad guardada: el próximo arranque tiene
+  // que pasar por el login. Una falta de señal NO dispara esto (Auth conserva
+  // la sesión guardada y solo emite null si de verdad no hay sesión).
+  if (!(user && user.emailVerified) && window.borrarIdentidadLocal) window.borrarIdentidadLocal();
   if (user && user.emailVerified) {
     resolverConUsuario(user);
   } else if (_yaResolvido) {
@@ -439,6 +449,7 @@ function esperarAutenticacion() {
   return _promesaAuth;
 }
 function cerrarSesion() {
+  if (window.borrarIdentidadLocal) window.borrarIdentidadLocal();
   firebase.auth().signOut().catch((e) => console.error("Error al cerrar sesión:", e));
 }
 function usuarioActual() {

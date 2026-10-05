@@ -111,6 +111,8 @@ async function cargarEstadoOrganizacion(soloLocal, prefetch) {
   try { ESPACIO_POR_PROYECTO_LOCAL = (await window.idbLeerMetaClave("espacioPorProyecto")) || {}; } catch (e) { ESPACIO_POR_PROYECTO_LOCAL = {}; }
 
   const user = window.usuarioActual ? window.usuarioActual() : null;
+  // Cuenta guardada en este dispositivo (solo para leer cachés locales; jamás para hablar con Firestore).
+  const userCache = user || (window.usuarioLocalCache ? window.usuarioLocalCache() : null);
   // La consulta de invitaciones sale junto con la de espacios (antes esperaba a que terminara la otra).
   let promesaInvitaciones = null;
   if (!soloLocal && user && user.email && window.fsListarInvitacionesPendientes) {
@@ -121,9 +123,13 @@ async function cargarEstadoOrganizacion(soloLocal, prefetch) {
     if (user && window.fsListarMisEspacios) {
       try { ESPACIOS = await window.fsListarMisEspacios(user.uid); guardarCacheEspacios(user); }
       catch (e) { ESPACIOS = await leerCacheEspacios(user); }   // sin conexión: la última lista conocida
+    } else if (!user && userCache) {
+      // Arranque local: la sesión de Firebase todavía no se confirmó (señal mala). Se usa la
+      // última lista conocida de la cuenta de este dispositivo para NO olvidar el espacio activo.
+      ESPACIOS = await leerCacheEspacios(userCache);
     }
-  } else if (!ESPACIOS.length && user) {
-    ESPACIOS = await leerCacheEspacios(user);   // primer pintado: ya se sabe en qué espacio estaba
+  } else if (!ESPACIOS.length && userCache) {
+    ESPACIOS = await leerCacheEspacios(userCache);   // primer pintado: ya se sabe en qué espacio estaba
   }
   try {
     const espacioGuardado = await window.idbLeerMetaClave("espacioActivoId");
@@ -1064,8 +1070,14 @@ function ordenarCarpetas(lista, modo) {
   return copia;
 }
 
+// Cuenta para MOSTRAR (avatar, nombre, correo): la sesión real si ya está, o la última cuenta
+// verificada en este dispositivo mientras Firebase Auth todavía no contesta (señal mala).
+function usuarioParaMostrar() {
+  return (window.usuarioActual ? window.usuarioActual() : null)
+    || (window.usuarioLocalCache ? window.usuarioLocalCache() : null);
+}
 function popupCuentaContenidoHTML() {
-  const user = window.usuarioActual ? window.usuarioActual() : null;
+  const user = usuarioParaMostrar();
   if (!user) return "";
   const ini = window.iniciales ? window.iniciales(user) : "?";
   const nombre = user.displayName || "Sin nombre";
@@ -1103,7 +1115,7 @@ function popupCuentaContenidoHTML() {
       </div>`;
 }
 function popupCuentaHTML() {
-  if (!(window.usuarioActual && window.usuarioActual())) return "";
+  if (!usuarioParaMostrar()) return "";
   return `<div class="proy-account-popup" id="proy-account-popup" hidden>${popupCuentaContenidoHTML()}</div>`;
 }
 function conectarBotonesPopup(popup) {
@@ -2157,7 +2169,7 @@ async function renderPantallaProyectos(permitirCerrar, soloLocal) {
         <button type="button" class="proy-hdr-btn" id="proy-hdr-abrir"><svg class="icon"><use href="#i-upload"/></svg>Abrir archivo</button>
         <button type="button" class="proy-hdr-btn primario" id="proy-hdr-nuevo"><svg class="icon"><use href="#i-plus"/></svg>Proyecto nuevo</button>
       </div>
-      <button type="button" class="proy-avatar-btn" id="proy-btn-avatar" aria-label="Cuenta">${escapeHtml(window.iniciales && window.usuarioActual ? window.iniciales(window.usuarioActual()) : "?")}</button>
+      <button type="button" class="proy-avatar-btn" id="proy-btn-avatar" aria-label="Cuenta">${escapeHtml(window.iniciales && usuarioParaMostrar() ? window.iniciales(usuarioParaMostrar()) : "?")}</button>
       ${dropdownEspacioHTML()}
       ${popupCuentaHTML()}
     </div>
@@ -2601,8 +2613,8 @@ function actualizarCuentaProyectos() {
   if (!overlay || overlay.hidden) return;
   const avatarBtn = document.getElementById("proy-btn-avatar");
   const popup = document.getElementById("proy-account-popup");
-  if (avatarBtn && window.usuarioActual && window.iniciales) {
-    avatarBtn.textContent = window.iniciales(window.usuarioActual());
+  if (avatarBtn && window.iniciales && usuarioParaMostrar()) {
+    avatarBtn.textContent = window.iniciales(usuarioParaMostrar());
   }
   if (popup) {
     popup.innerHTML = popupCuentaContenidoHTML();
@@ -2613,6 +2625,12 @@ function actualizarCuentaProyectos() {
 window.mostrarPantallaProyectos = mostrarPantallaProyectos;
 window.ocultarPantallaProyectos = ocultarPantallaProyectos;
 window.actualizarCuentaProyectos = actualizarCuentaProyectos;
+// Sesión confirmada DESPUÉS de abrir la app en modo local (ver initApp): trae lo compartido/del espacio.
+window.refrescarProyectosTrasAuth = function () {
+  const overlay = document.getElementById("pantalla-proyectos");
+  if (!overlay || overlay.hidden) return;
+  sincronizarProyectosRemotosYActualizar(ULTIMO_PERMITIR_CERRAR);
+};
 window.espacioActivoIdActual = function () { return ESPACIO_ACTIVO_ID; };
 // Cierra el hueco de "proyecto creado 100% offline dentro de un espacio
 // compartido no aparece en la lista agrupada hasta la primera sincronización".

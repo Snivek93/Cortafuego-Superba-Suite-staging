@@ -1088,6 +1088,101 @@ function borrarTodo() {
   );
 }
 
+// ----------------------------------------------------------------------------
+// Arranque que NO depende de la red (05/10/2026). Bug real de Kevin: con señal
+// mala la app se quedaba en el splash y luego en pantalla negra porque
+// initApp() esperaba esperarAutenticacion() sin tope de tiempo (y los SDK de
+// Firebase eran <script> síncronos que podían colgar el DOMContentLoaded).
+//  - Con una cuenta ya verificada en este dispositivo (identidad local): si
+//    Firebase Auth no contesta en AUTH_ESPERA_CON_CUENTA_MS, la app abre con
+//    los datos locales y la sesión se completa en segundo plano.
+//  - Sin cuenta guardada (primera vez en este dispositivo): hace falta iniciar
+//    sesión con conexión; si no hay, se muestra un aviso claro (no un splash
+//    eterno) y se sigue esperando.
+// Todo está protegido con "window.x &&": funciona aunque alguno de los módulos
+// nuevos (arranque-offline.js, firebase-auth.js) todavía no haya cargado, o sea
+// de una versión anterior.
+// ----------------------------------------------------------------------------
+const AUTH_ESPERA_CON_CUENTA_MS = 3500;
+const AVISO_PRIMER_INGRESO_MS = 6000;
+const ESPERA_AGOTADA = { agotada: true };
+
+function esperarTope(ms) {
+  return new Promise((resolve) => setTimeout(() => resolve(ESPERA_AGOTADA), ms));
+}
+
+// Se resuelve con el usuario verificado cuando Firebase Auth lo confirma. Nunca
+// se rechaza; si Firebase no llega a cargar, simplemente queda pendiente.
+function promesaDeSesion() {
+  return (async () => {
+    if (window.firebaseListo) { try { await window.firebaseListo; } catch (e) {} }
+    if (window.esperarAutenticacion) return window.esperarAutenticacion();
+    return new Promise(() => {});
+  })();
+}
+
+// Devuelve "online" (sesión confirmada) o "local" (se abre con lo guardado en
+// este dispositivo mientras la sesión se confirma sola cuando haya señal).
+async function esperarSesionOModoLocal() {
+  const identidad = window.leerIdentidadLocal ? window.leerIdentidadLocal() : null;
+  const sesion = promesaDeSesion();
+  if (identidad) {
+    const r = await Promise.race([sesion, esperarTope(AUTH_ESPERA_CON_CUENTA_MS)]);
+    if (r !== ESPERA_AGOTADA) return "online";
+    sesion.then((user) => alAutenticarseTrasModoLocal(user, identidad));
+    return "local";
+  }
+  const aviso = setTimeout(() => {
+    if (window.mostrarPanelPrimerIngreso) window.mostrarPanelPrimerIngreso();
+  }, AVISO_PRIMER_INGRESO_MS);
+  try { await sesion; } finally { clearTimeout(aviso); }
+  if (window.quitarPanelPrimerIngreso) window.quitarPanelPrimerIngreso();
+  return "online";
+}
+
+// La sesión se confirmó DESPUÉS de haber abierto la app en modo local.
+function alAutenticarseTrasModoLocal(user, identidad) {
+  try {
+    // Entró otra cuenta distinta de la guardada: se recarga para no arrastrar
+    // estado de la anterior (igual que ya hace firebase-auth.js al cerrar sesión).
+    if (identidad && user && identidad.uid && user.uid && identidad.uid !== user.uid) {
+      window.location.reload();
+      return;
+    }
+    if (window.actualizarCuentaProyectos) window.actualizarCuentaProyectos();
+    if (window.refrescarProyectosTrasAuth) window.refrescarProyectosTrasAuth();
+    const id = PROYECTO_ACTIVO_ID;
+    if (id) {
+      // Si se abrió un proyecto mientras la sesión estaba pendiente, nunca se
+      // llegó a ver si es compartido ni se tomó el candado. Sin ediciones
+      // locales se hace igual que al abrirlo con sesión; CON ediciones locales
+      // NO se adopta lo remoto a ciegas (pisaría el trabajo): manejarReconexion
+      // pregunta si hay conflicto, y después se completa lo que faltara.
+      if (!PROYECTO_ACTIVO_HUBO_EDICION) {
+        detectarSiEsCompartido(id);
+      } else {
+        manejarReconexion().then(() => {
+          if (PROYECTO_ACTIVO_ID === id && !PROYECTO_ACTIVO_COMPARTIDO) detectarSiEsCompartido(id);
+        });
+      }
+    }
+  } catch (e) {
+    console.error("No se pudo completar la sesión tras el arranque local:", e);
+  }
+}
+
+// ¿Es mal momento para recargar la página sola (p. ej. por una versión nueva
+// del Service Worker)? Lo usa index.html.
+function appOcupada() {
+  if (guardadoEnCurso || firestoreSyncEnCurso) return true;
+  if (document.visibilityState === "hidden") return false;
+  const ae = document.activeElement;
+  if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return true;
+  const login = document.getElementById("pantalla-login");
+  if (login && !login.hidden && login.classList.contains("auth-visible")) return true;
+  return false;
+}
+
 async function initApp() {
   const yearEl = document.getElementById("footer-year");
   if (yearEl) yearEl.textContent = new Date().getFullYear();
@@ -1389,15 +1484,27 @@ async function initApp() {
     mostrarVistaProyecto();
     mostrarToast(`Proyecto cargado automáticamente: ${ROWS.length} fila(s).`);
   } else {
-    if (window.esperarAutenticacion) await window.esperarAutenticacion();
-    await migrarProyectoUnicoSiHaceFalta();
-    if (window.mostrarPantallaProyectos) {
-      await window.mostrarPantallaProyectos();
-    } else {
-      for (let i = 0; i < 3; i++) ROWS.push(nuevaFila());
-      renderTable();
-      renderLevantamientoTab();
+    let modoArranque = "online";
+    try { modoArranque = await esperarSesionOModoLocal(); } catch (e) { modoArranque = "local"; }
+    try { await migrarProyectoUnicoSiHaceFalta(); } catch (e) { console.error("Migración de proyecto único:", e); }
+    try {
+      if (window.mostrarPantallaProyectos) {
+        await window.mostrarPantallaProyectos();
+      } else {
+        for (let i = 0; i < 3; i++) ROWS.push(nuevaFila());
+        renderTable();
+        renderLevantamientoTab();
+        mostrarVistaProyecto();
+      }
+    } catch (e) {
+      // Red de seguridad: un error al armar la lista NUNCA debe dejar la
+      // pantalla negra (body.app-arrancando). Se muestra la app y se avisa.
+      console.error("No se pudo armar la pantalla de proyectos:", e);
       mostrarVistaProyecto();
+      mostrarToast("No se pudo cargar la lista de proyectos. Recargá la app.", "error");
+    }
+    if (modoArranque === "local") {
+      mostrarToast("Sin conexión estable: se abrió con los datos de este dispositivo. La sesión se confirma sola cuando haya señal.");
     }
   }
   ocultarSplashInicial();
@@ -1436,4 +1543,5 @@ window.idbGuardarMetaClave = idbGuardarMetaClave;
 window.idbLeerMetaClave = idbLeerMetaClave;
 window.abrirProyectoExistente = abrirProyectoExistente;
 window.crearYAbrirProyectoNuevo = crearYAbrirProyectoNuevo;
+window.appOcupada = appOcupada;
 })();
