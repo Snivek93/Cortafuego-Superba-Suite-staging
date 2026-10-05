@@ -725,14 +725,11 @@
 <script src="src/modules/ui-comun-y-cuantificacion.js"></script>
 <script src="src/modules/archivo-guardar-cargar.js"></script>
 <script src="src/modules/excel-export-import.js"></script>
-<script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-storage-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-functions-compat.js"></script>
-<script src="src/modules/firebase-auth.js"></script>
-<script src="src/modules/firestore-sync.js"></script>
-<script src="src/modules/firestore-storage-sync.js"></script>
+<!-- Firebase (SDK + firebase-auth.js + firestore-sync.js + firestore-storage-sync.js) ya NO
+     se carga con <script> síncronos acá: con señal mala un solo pedido colgado a gstatic
+     impedía que la app arrancara. arranque-offline.js los inyecta en diferido, en orden y con
+     reintentos, y expone window.firebaseListo. La versión del SDK vive en ese archivo. -->
+<script src="src/modules/arranque-offline.js"></script>
 <script src="src/modules/archivo-estado-app.js"></script>
 <script src="src/modules/zip-writer.js"></script>
 <script src="src/modules/proyectos.js"></script>
@@ -747,16 +744,21 @@ if ("serviceWorker" in navigator && (location.protocol === "https:" || location.
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("sw.js").catch(() => {});
   });
-  // Cuando el Service Worker nuevo manda el mensaje SW_ACTUALIZADO (lo hace
-  // después de activarse y reclamar control), recargamos una sola vez para
-  // que el usuario vea la versión nueva de inmediato, sin tener que cerrar
-  // y volver a abrir la app.
+  // Cuando el Service Worker nuevo manda el mensaje SW_ACTUALIZADO (versión nueva
+  // COMPLETA ya guardada), recargamos una sola vez para que el usuario la vea sin
+  // cerrar y volver a abrir la app. Pero NO a mitad de algo: si se está guardando,
+  // hay un campo con el cursor o el login abierto, se espera (ver appOcupada() en
+  // archivo-estado-app.js). La primera instalación NO recarga (SW_LISTO).
   let yaRecargo = false;
+  function intentarRecargaPorActualizacion() {
+    if (yaRecargo) return;
+    const ocupada = typeof window.appOcupada === "function" && window.appOcupada();
+    if (ocupada) { setTimeout(intentarRecargaPorActualizacion, 5000); return; }
+    yaRecargo = true;
+    location.reload();
+  }
   navigator.serviceWorker.addEventListener("message", (event) => {
-    if (event.data && event.data.tipo === "SW_ACTUALIZADO" && !yaRecargo) {
-      yaRecargo = true;
-      location.reload();
-    }
+    if (event.data && event.data.tipo === "SW_ACTUALIZADO") intentarRecargaPorActualizacion();
   });
 }
 </script>
