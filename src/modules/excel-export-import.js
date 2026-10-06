@@ -399,7 +399,42 @@ async function importarMatrizJuntasExcel(file) {
 
 // ============================================================================
 // Importar un levantamiento desde el Excel original (hoja CALCULADORA)
+// ----------------------------------------------------------------------------
+// Si el proyecto ya tiene filas se ofrece REEMPLAZAR o AÑADIR (acumular varios
+// levantamientos). Al añadir NO se tocan los espesores/desperdicio del proyecto
+// (parámetros de cálculo): solo se avisa si el Excel trae valores distintos.
 // ============================================================================
+// Campos que identifican una fila para detectar repetidas al añadir.
+const CAMPOS_FIRMA_IMPORT = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "L", "M", "N", "O", "P"];
+function firmaFilaImport(r) {
+  return CAMPOS_FIRMA_IMPORT.map(k => {
+    const v = r[k];
+    return (v === undefined || v === null) ? "" : String(v).trim();
+  }).join("\u241F");
+}
+// Fila sin datos reales (las que trae un proyecto recién creado): ni zona, ni
+// nivel, ni dimensiones, ni nota. Reemplazarlas no pierde nada.
+function filaEnBlancoImport(r) {
+  const vacio = (v) => v === "" || v === undefined || v === null;
+  return vacio(r.A) && vacio(r.B) && vacio(r.D) && vacio(r.F) && vacio(r.G) && vacio(r.H) && vacio(r.R);
+}
+// Separa las filas del Excel en "nuevas" y "ya existen idénticas" (cada fila
+// existente se consume una sola vez, así una fila repetida a propósito dentro
+// del mismo Excel no se confunde con un duplicado).
+function separarRepetidasImport(existentes, nuevas) {
+  const disponibles = new Map();
+  existentes.forEach(r => { const k = firmaFilaImport(r); disponibles.set(k, (disponibles.get(k) || 0) + 1); });
+  const sinRepetir = [];
+  let repetidas = 0;
+  nuevas.forEach(r => {
+    const k = firmaFilaImport(r);
+    const quedan = disponibles.get(k) || 0;
+    if (quedan > 0) { disponibles.set(k, quedan - 1); repetidas++; }
+    else sinRepetir.push(r);
+  });
+  return { sinRepetir, repetidas };
+}
+
 function importarExcel(file) {
   const reader = new FileReader();
   reader.onerror = () => mostrarToast("No se pudo leer el archivo seleccionado.", "error");
@@ -448,22 +483,66 @@ function importarExcel(file) {
       return;
     }
 
-    const aplicar = () => {
-      pushUndo();
-      ROWS = nuevas;
-      Object.assign(CONFIG, nuevoConfig);
-      sincronizarCamposConfig();
+    const refrescar = () => {
       renderTable();
       if (ACTIVE_TAB === "resumen") renderResumen();
       if (ACTIVE_TAB === "levantamiento-tab") renderLevantamientoTab();
       marcarCambio();
+    };
+    const aplicarReemplazo = () => {
+      pushUndo();
+      ROWS = nuevas;
+      Object.assign(CONFIG, nuevoConfig);
+      sincronizarCamposConfig();
+      refrescar();
       mostrarToast(`Levantamiento importado: ${nuevas.length} fila(s) cargadas desde "${sheetName}".`);
     };
-    if (ROWS.length > 0) {
-      pedirConfirmacion(`Se encontraron ${nuevas.length} fila(s) en el Excel. Esto va a reemplazar las filas actuales del proyecto. ¿Continuar?`, aplicar);
-    } else {
-      aplicar();
+    const aplicarAnadir = (lista, omitidas) => {
+      if (lista.length === 0) {
+        mostrarToast("No se añadió nada: todas las filas del Excel ya existen idénticas en el proyecto.", "error");
+        return;
+      }
+      pushUndo();
+      ROWS = ROWS.concat(lista);
+      refrescar();
+      mostrarToast(`Levantamiento añadido: ${lista.length} fila(s) nuevas desde "${sheetName}"`
+        + (omitidas ? ` (${omitidas} omitida(s) por ya existir)` : "") + `. Total en el proyecto: ${ROWS.length}.`);
+    };
+
+    const existentes = ROWS.filter(r => !filaEnBlancoImport(r));
+    // Proyecto sin datos reales (p. ej. recién creado): no hay nada que conservar ni que elegir.
+    if (existentes.length === 0) { aplicarReemplazo(); return; }
+
+    // Sin el cuadro de elección (no debería pasar) se conserva el comportamiento anterior.
+    if (typeof window.pedirEleccion !== "function") {
+      pedirConfirmacion(`Se encontraron ${nuevas.length} fila(s) en el Excel. Esto va a reemplazar las filas actuales del proyecto. ¿Continuar?`, aplicarReemplazo);
+      return;
     }
+
+    const { sinRepetir, repetidas } = separarRepetidasImport(existentes, nuevas);
+    // Espesores/desperdicio del Excel distintos a los del proyecto (solo informativo).
+    const configDistinta = Object.keys(nuevoConfig).some(k => Number(CONFIG[k]) !== Number(nuevoConfig[k]));
+    let mensaje = `El Excel trae ${nuevas.length} fila(s) y el proyecto ya tiene ${existentes.length}. ¿Qué querés hacer?`;
+    if (repetidas > 0) mensaje += repetidas === nuevas.length
+      ? " Todas las filas del Excel ya existen idénticas en el proyecto."
+      : ` ${repetidas} de ellas ya existen idénticas en el proyecto.`;
+    if (configDistinta) mensaje += " Ojo: el Excel trae espesores/desperdicio distintos a los del proyecto; al añadir se conservan los del proyecto y al reemplazar se usan los del Excel.";
+
+    const opciones = [];
+    if (repetidas > 0) {
+      opciones.push({ label: `Añadir solo las ${sinRepetir.length} nuevas (omite ${repetidas} que ya existen)`, act: "anadir-nuevas", clase: "primary" });
+      opciones.push({ label: `Añadir las ${nuevas.length} (incluye ${repetidas} repetida(s))`, act: "anadir-todas", clase: "secondary" });
+    } else {
+      opciones.push({ label: `Añadir ${nuevas.length} fila(s) al levantamiento actual`, act: "anadir-todas", clase: "primary" });
+    }
+    opciones.push({ label: "Reemplazar todo (descarta las filas actuales)", act: "reemplazar", clase: "danger" });
+    opciones.push({ label: "Cancelar", act: "cancelar", clase: "secondary" });
+
+    window.pedirEleccion(mensaje, opciones, (eleccion) => {
+      if (eleccion === "anadir-nuevas") aplicarAnadir(sinRepetir, repetidas);
+      else if (eleccion === "anadir-todas") aplicarAnadir(nuevas, 0);
+      else if (eleccion === "reemplazar") aplicarReemplazo();
+    });
   };
   reader.readAsArrayBuffer(file);
 }
